@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from typing import Literal
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -42,6 +41,8 @@ class FeatureSummary(BaseModel):
     etco2_current: float
     spo2_current: float | None = None
     cvp_current: float | None = None
+    arterial_waveform_range: float | None = None
+    ecg_waveform_std: float | None = None
     map_below_65_fraction: float
     signal_quality: SignalQualityReport
 
@@ -51,6 +52,7 @@ class ClinicalAssessment(BaseModel):
     predicted_map_15min: float
     hypotension_risk_level: RiskLevel
     primary_risk: str = "Intraoperative Hypotension"
+    secondary_risk: str | None = None
     confidence_score: float = Field(ge=0, le=1)
     suspected_mechanism: Mechanism
     suggested_action: str
