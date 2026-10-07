@@ -195,7 +195,7 @@ def test_patient_csv_replay_parser():
     from patient_replay import parse_csv_text
 
     csv_text = """timestamp,MAP,HR,SVV,EtCO2,SpO2,CVP
-2026-10-08T10:00:00,82,76,9,36,7
+2026-10-08T10:00:00,82,76,9,36,99,7
 2026-10-08T10:00:30,79,78,10,35,99,7
 2026-10-08T10:01:00,75,81,12,34,98,6
 """
