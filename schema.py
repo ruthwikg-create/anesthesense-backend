@@ -1,14 +1,19 @@
 from __future__ import annotations
+
 from typing import Literal
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 
 RiskLevel = Literal["CRITICAL", "HIGH", "MODERATE", "LOW"]
 Mechanism = Literal["Hypovolemia", "Vasodilation", "Mixed", "Normal", "Unknown"]
 SignalQuality = Literal["GOOD", "FAIR", "POOR"]
-Scenario = Literal["Vasodilation", "Hypovolemia", "Normotensive", "HypoxiaStress"]
+Scenario = Literal["Vasodilation", "Hypovolemia", "Normotensive", "HypoxiaStress", "Hemorrhage", "MixedShock"]
+
 
 class TelemetryFrame(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
     timestamp: float | None = None
     minute: float
     MAP: float = Field(ge=0, le=1000)
@@ -20,6 +25,7 @@ class TelemetryFrame(BaseModel):
     arterial_waveform: list[float] | None = Field(default=None, min_length=4, max_length=2000)
     ecg_waveform: list[float] | None = Field(default=None, min_length=4, max_length=2000)
 
+
 class PatientTelemetry(BaseModel):
     patient_id: str = Field(min_length=1, max_length=128)
     sampling_interval_seconds: float = Field(default=60.0, gt=0, le=60)
@@ -28,15 +34,17 @@ class PatientTelemetry(BaseModel):
     @field_validator("telemetry")
     @classmethod
     def ordered_frames(cls, value):
-        if any(value[i].minute > value[i+1].minute for i in range(len(value)-1)):
+        if any(value[i].minute > value[i + 1].minute for i in range(len(value) - 1)):
             raise ValueError("Telemetry frames must be ordered by minute.")
         return value
+
 
 class SimulationRequest(BaseModel):
     patient_id: str = Field(default="SIM-001", min_length=1, max_length=128)
     scenario: Scenario = "Vasodilation"
     frames: int = Field(default=31, ge=6, le=120)
     interval_seconds: float = Field(default=30, gt=0, le=60)
+
 
 class SignalQualityReport(BaseModel):
     quality: SignalQuality
@@ -45,10 +53,18 @@ class SignalQualityReport(BaseModel):
     artifact_rate: float = Field(ge=0, le=1)
     notes: list[str] = Field(default_factory=list)
 
+
 class FeatureSummary(BaseModel):
     map_current: float
     map_slope_per_min: float
     map_drop: float
+    map_acceleration_per_min2: float = 0.0
+    predicted_map_10min: float
+    predicted_map_15min: float
+    hypotension_probability: float = Field(ge=0, le=1)
+    trajectory: str
+    trend_strength: float = Field(ge=0, le=1)
+    map_volatility: float = 0.0
     hr_current: float
     hr_slope_per_min: float
     svv_current: float
@@ -59,6 +75,7 @@ class FeatureSummary(BaseModel):
     ecg_waveform_std: float | None = None
     map_below_65_fraction: float
     signal_quality: SignalQualityReport
+
 
 class ClinicalAssessment(BaseModel):
     hemodynamic_risk_score: float = Field(ge=0, le=100)
@@ -73,6 +90,11 @@ class ClinicalAssessment(BaseModel):
     suppress_alarm: bool = False
     guardrail_note: str | None = None
     data_quality: SignalQuality
+    alert_priority: str = "ROUTINE"
+    contributing_factors: list[str] = Field(default_factory=list)
+    explanation: str = ""
+    disclaimer: str = "Prototype CDS for research/demo use; not clinically validated."
+
 
 class PredictionResponse(BaseModel):
     patient_id: str
@@ -81,3 +103,4 @@ class PredictionResponse(BaseModel):
     pipeline: list[str]
     features: FeatureSummary
     clinical_assessment: ClinicalAssessment
+    event_log: list[str] = Field(default_factory=list)
