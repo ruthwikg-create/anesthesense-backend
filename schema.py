@@ -1,35 +1,67 @@
 from __future__ import annotations
+
 from typing import Literal
 from pydantic import BaseModel, Field, ConfigDict
 
 RiskLevel = Literal["CRITICAL", "HIGH", "MODERATE", "LOW"]
 Mechanism = Literal["Hypovolemia", "Vasodilation", "Mixed", "Normal", "Unknown"]
+SignalQuality = Literal["GOOD", "FAIR", "POOR"]
 
 class TelemetryFrame(BaseModel):
     model_config = ConfigDict(extra="ignore")
+    timestamp: float | None = None
     minute: float
     MAP: float = Field(ge=20, le=220)
     HR: float = Field(ge=20, le=250)
     SVV: float = Field(ge=0, le=100)
     EtCO2: float = Field(ge=0, le=100)
     SpO2: float | None = Field(default=None, ge=0, le=100)
+    CVP: float | None = Field(default=None, ge=-10, le=60)
+    arterial_waveform: list[float] | None = Field(default=None, min_length=4, max_length=2000)
+    ecg_waveform: list[float] | None = Field(default=None, min_length=4, max_length=2000)
 
 class PatientTelemetry(BaseModel):
     patient_id: str = Field(min_length=1, max_length=128)
-    telemetry: list[TelemetryFrame] = Field(min_length=2, max_length=120)
+    sampling_interval_seconds: float = Field(default=60.0, gt=0, le=60)
+    telemetry: list[TelemetryFrame] = Field(min_length=2, max_length=1200)
+
+class SignalQualityReport(BaseModel):
+    quality: SignalQuality
+    valid_frames: int
+    rejected_frames: int
+    artifact_rate: float = Field(ge=0, le=1)
+    notes: list[str] = Field(default_factory=list)
+
+class FeatureSummary(BaseModel):
+    map_current: float
+    map_slope_per_min: float
+    map_drop: float
+    hr_current: float
+    hr_slope_per_min: float
+    svv_current: float
+    etco2_current: float
+    spo2_current: float | None = None
+    cvp_current: float | None = None
+    map_below_65_fraction: float
+    signal_quality: SignalQualityReport
 
 class ClinicalAssessment(BaseModel):
+    hemodynamic_risk_score: float = Field(ge=0, le=100)
+    prediction_window_mins: int = Field(ge=10, le=15)
     predicted_map_15min: float
     hypotension_risk_level: RiskLevel
-    confidence_score: float = Field(ge=0.0, le=1.0)
+    primary_risk: str = "Intraoperative Hypotension"
+    confidence_score: float = Field(ge=0, le=1)
     suspected_mechanism: Mechanism
-    suggested_action: str = Field(min_length=1)
+    suggested_action: str
     suppress_alarm: bool = False
     guardrail_note: str | None = None
-    data_quality: Literal["GOOD", "LIMITED"] = "GOOD"
+    data_quality: SignalQuality
 
 class PredictionResponse(BaseModel):
     patient_id: str
     frames_processed: int
     alert_triggered: bool
+    pipeline: list[str]
+    features: FeatureSummary
     clinical_assessment: ClinicalAssessment
