@@ -11,12 +11,12 @@ class TelemetryFrame(BaseModel):
     model_config = ConfigDict(extra="ignore")
     timestamp: float | None = None
     minute: float
-    MAP: float = Field(ge=20, le=220)
-    HR: float = Field(ge=20, le=250)
-    SVV: float = Field(ge=0, le=100)
-    EtCO2: float = Field(ge=0, le=100)
-    SpO2: float | None = Field(default=None, ge=0, le=100)
-    CVP: float | None = Field(default=None, ge=-10, le=60)
+    MAP: float = Field(ge=0, le=1000)
+    HR: float = Field(ge=0, le=500)
+    SVV: float = Field(ge=0, le=150)
+    EtCO2: float = Field(ge=0, le=150)
+    SpO2: float | None = Field(default=None, ge=0, le=120)
+    CVP: float | None = Field(default=None, ge=-20, le=100)
     arterial_waveform: list[float] | None = Field(default=None, min_length=4, max_length=2000)
     ecg_waveform: list[float] | None = Field(default=None, min_length=4, max_length=2000)
 
