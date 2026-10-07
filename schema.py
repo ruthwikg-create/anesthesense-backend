@@ -1,10 +1,11 @@
 from __future__ import annotations
 from typing import Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 RiskLevel = Literal["CRITICAL", "HIGH", "MODERATE", "LOW"]
 Mechanism = Literal["Hypovolemia", "Vasodilation", "Mixed", "Normal", "Unknown"]
 SignalQuality = Literal["GOOD", "FAIR", "POOR"]
+Scenario = Literal["Vasodilation", "Hypovolemia", "Normotensive", "HypoxiaStress"]
 
 class TelemetryFrame(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -23,6 +24,19 @@ class PatientTelemetry(BaseModel):
     patient_id: str = Field(min_length=1, max_length=128)
     sampling_interval_seconds: float = Field(default=60.0, gt=0, le=60)
     telemetry: list[TelemetryFrame] = Field(min_length=2, max_length=1200)
+
+    @field_validator("telemetry")
+    @classmethod
+    def ordered_frames(cls, value):
+        if any(value[i].minute > value[i+1].minute for i in range(len(value)-1)):
+            raise ValueError("Telemetry frames must be ordered by minute.")
+        return value
+
+class SimulationRequest(BaseModel):
+    patient_id: str = Field(default="SIM-001", min_length=1, max_length=128)
+    scenario: Scenario = "Vasodilation"
+    frames: int = Field(default=31, ge=6, le=120)
+    interval_seconds: float = Field(default=30, gt=0, le=60)
 
 class SignalQualityReport(BaseModel):
     quality: SignalQuality
