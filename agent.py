@@ -25,18 +25,50 @@ def _slope(values, minutes):
 def preprocess(telemetry):
     valid = []
     rejected = 0
+    optional_fields = ("SVV", "EtCO2", "SpO2", "CVP")
+
     for frame in telemetry.telemetry:
-        if 20 <= frame.MAP <= 220 and 20 <= frame.HR <= 250 and 0 <= frame.SVV <= 100 and 0 <= frame.EtCO2 <= 100:
+        valid_frame = (
+            20 <= frame.MAP <= 220
+            and 20 <= frame.HR <= 250
+            and (frame.SVV is None or 0 <= frame.SVV <= 100)
+            and (frame.EtCO2 is None or 0 <= frame.EtCO2 <= 100)
+            and (frame.SpO2 is None or 70 <= frame.SpO2 <= 100)
+            and (frame.CVP is None or -20 <= frame.CVP <= 100)
+        )
+        if valid_frame:
             valid.append(frame)
         else:
             rejected += 1
 
     rate = rejected / len(telemetry.telemetry)
-    quality = "GOOD" if rate <= 0.05 else "FAIR" if rate <= 0.20 else "POOR"
-    notes = []
+    availability = sum(
+        sum(getattr(frame, field) is not None for field in optional_fields)
+        for frame in valid
+    )
+    total_optional = max(1, len(valid) * len(optional_fields))
+    completeness = availability / total_optional
 
+    if rate > 0.20 or completeness < 0.50:
+        quality = "POOR"
+    elif rate > 0.05 or completeness < 0.75:
+        quality = "FAIR"
+    else:
+        quality = "GOOD"
+
+    notes = []
     if rejected:
         notes.append("Out-of-range frames removed before inference.")
+    if completeness < 1:
+        missing = [
+            field
+            for field in optional_fields
+            if not any(getattr(frame, field) is not None for frame in valid)
+        ]
+        if missing:
+            notes.append("Unavailable signals: " + ", ".join(missing) + ".")
+        else:
+            notes.append("Some optional signal samples are missing.")
     if any(f.arterial_waveform for f in valid):
         notes.append("Arterial waveform samples received; prototype morphology range feature extracted.")
     if any(f.ecg_waveform for f in valid):
@@ -52,6 +84,7 @@ def preprocess(telemetry):
         valid_frames=len(valid),
         rejected_frames=rejected,
         artifact_rate=rate,
+        signal_completeness=round(completeness, 3),
         notes=notes,
     )
 
@@ -109,16 +142,19 @@ def _predict(f):
     secondary = None
     if f.spo2_current is not None and f.spo2_current < 92:
         secondary = "Hypoxemia signal"
-    elif f.etco2_current < 30:
+    elif f.etco2_current is not None and f.etco2_current < 30:
         secondary = "Low EtCO2 signal"
 
-    if f.map_current < 70 and f.svv_current > HIGH_SVV and f.etco2_current < 30:
+    svv_high = f.svv_current is not None and f.svv_current > HIGH_SVV
+    low_etco2 = f.etco2_current is not None and f.etco2_current < 30
+
+    if f.map_current < 70 and svv_high and low_etco2:
         mechanism = "Mixed"
         action = (
             "Assess volume status, blood loss, anesthetic depth, and low-flow contributors; "
             "use clinician-directed management and reassessment."
         )
-    elif f.map_current < 70 and f.svv_current > HIGH_SVV:
+    elif f.map_current < 70 and svv_high:
         mechanism = "Hypovolemia"
         action = (
             "Assess volume status and surgical blood loss; consider clinician-directed "
@@ -134,11 +170,11 @@ def _predict(f):
         mechanism = "Normal"
         action = "Continue routine monitoring; reassess if trajectory worsens."
 
-    confidence = 0.68
+    confidence = 0.55
     confidence += 0.12 * f.trend_strength
-    confidence += 0.08 if f.signal_quality.quality == "GOOD" else 0.02
-    confidence += 0.06 if len([f.map_current]) else 0
-    confidence = min(0.94, round(confidence, 3))
+    confidence += 0.10 * f.signal_quality.signal_completeness
+    confidence -= 0.10 * f.signal_quality.artifact_rate
+    confidence = min(0.94, max(0.30, round(confidence, 3)))
 
     priority = "CRITICAL" if risk == "CRITICAL" else "HIGH" if risk == "HIGH" else "WATCH" if risk == "MODERATE" else "ROUTINE"
 
