@@ -230,3 +230,54 @@ It must not be connected to real patient care without:
 - appropriate institutional and clinician oversight
 
 The project deliberately avoids autonomous drug dosing.
+
+
+## Clinician-first workflow
+
+The dashboard is designed so changing a patient does **not** require changing Python code or CDS logic.
+
+### Patient data replay
+
+1. Start the backend.
+2. Start the dashboard.
+3. Choose **Patient data file**.
+4. Upload a de-identified CSV exported from a monitor/research dataset.
+5. Enter a case ID.
+6. Press **Start patient replay**.
+
+Supported core columns:
+- MAP
+- HR
+
+Optional columns:
+- SVV
+- EtCO2
+- SpO2
+- CVP
+- timestamp or elapsed minute
+
+The parser accepts common column-name variations and reports which signals were imported. Missing signals are never fabricated; the system lowers signal completeness/quality and displays that limitation.
+
+### Clinician view
+
+The primary screen shows only:
+- current MAP
+- 15-minute predicted MAP
+- risk level
+- risk score
+- confidence
+- trajectory
+- signal quality/completeness
+- likely mechanism
+- contributing factors
+- clinician-directed review message
+
+Technical features, event logs, pipeline details and audit JSON are placed under **Research / validation details**.
+
+### Replay validation
+
+For historical files containing future observations, the dashboard calculates retrospective MAP prediction MAE at +10 and +15 minutes. These values describe that replay file only; they are not clinical validation or calibration.
+
+### Important boundary
+
+The CSV replay workflow is for **de-identified historical/research data**. It is not a live clinical monitor integration. Direct patient-monitor integration would require a separate validated interoperability layer, privacy/security controls, clinical evaluation and appropriate institutional/regulatory oversight.
