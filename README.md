@@ -258,6 +258,8 @@ Optional columns:
 
 The parser accepts common column-name variations and reports which signals were imported. Missing signals are never fabricated; the system lowers signal completeness/quality and displays that limitation.
 
+A ready-to-test example is included at `data/example_patient.csv`. It is synthetic demonstration data, not a real patient record.
+
 ### Clinician view
 
 The primary screen shows only:
