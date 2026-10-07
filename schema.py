@@ -1,0 +1,1 @@
+from pydantic import BaseModel`n`nclass PatientTelemetry(BaseModel):`n    patient_id: str`n    heart_rate: float`n    spo2: float`n    blood_pressure_sys: float`n    blood_pressure_dia: float`n    etco2: float`n`nclass PredictionResponse(BaseModel):`n    patient_id: str`n    risk_level: str`n    recommendation: str
