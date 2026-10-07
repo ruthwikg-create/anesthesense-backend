@@ -172,3 +172,37 @@ def test_safety_never_downgrades_baseline():
     ).json()
     assert body["clinical_assessment"]["hypotension_risk_level"] in {"HIGH", "CRITICAL"}
     assert body["clinical_assessment"]["suppress_alarm"] is False
+
+
+def test_missing_optional_signals_are_supported():
+    p = telemetry([82, 80, 78, 76, 74, 72])
+    for frame in p["telemetry"]:
+        frame.pop("SVV", None)
+        frame.pop("EtCO2", None)
+        frame.pop("SpO2", None)
+
+    r = client.post("/api/v1/predict", json=p)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["features"]["svv_current"] is None
+    assert body["features"]["etco2_current"] is None
+    assert body["features"]["spo2_current"] is None
+    assert body["features"]["signal_quality"]["quality"] == "POOR"
+    assert body["features"]["signal_quality"]["signal_completeness"] < 0.5
+
+
+def test_patient_csv_replay_parser():
+    from patient_replay import parse_csv_text
+
+    csv_text = """timestamp,MAP,HR,SVV,EtCO2,SpO2,CVP
+2026-10-08T10:00:00,82,76,9,36,7
+2026-10-08T10:00:30,79,78,10,35,99,7
+2026-10-08T10:01:00,75,81,12,34,98,6
+"""
+    telemetry, report = parse_csv_text(csv_text, patient_id="CASE-CSV")
+    assert telemetry.patient_id == "CASE-CSV"
+    assert len(telemetry.telemetry) == 3
+    assert report.rows_used == 3
+    assert report.rows_skipped == 0
+    assert report.sampling_interval_seconds == 30
+    assert "MAP" in report.mapped_columns
