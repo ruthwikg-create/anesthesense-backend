@@ -47,7 +47,12 @@ def _predict(f):
     elif predicted<65:risk="HIGH"
     elif score>=40:risk="MODERATE"
     else:risk="LOW"
-    if f.map_current<70 and f.svv_current>13 and f.etco2_current<30: mechanism="Mixed"; action="Assess volume status, blood loss, anesthetic depth, and low-flow contributors; clinician-directed management and reassessment are required."\n    elif f.map_current<70 and f.svv_current>13: mechanism="Hypovolemia"; action="Assess volume status and surgical blood loss; consider clinician-directed fluid/blood management and reassess MAP/SVV."
+    if f.map_current < 70 and f.svv_current > 13 and f.etco2_current < 30:
+        mechanism = "Mixed"
+        action = "Assess volume status, blood loss, anesthetic depth, and low-flow contributors; clinician-directed management and reassessment are required."
+    elif f.map_current < 70 and f.svv_current > 13:
+        mechanism = "Hypovolemia"
+        action = "Assess volume status and surgical blood loss; consider clinician-directed fluid/blood management and reassess MAP/SVV."
     elif f.map_current<70: mechanism="Vasodilation"; action="Assess anesthetic depth and vasodilatory causes; consider clinician-directed vasopressor support and reassess MAP."
     else: mechanism="Normal"; action="Continue routine monitoring; reassess if trajectory worsens."
     confidence=min(.94,.70+(.08 if f.signal_quality.quality=="GOOD" else 0)+(.08 if len([f.map_current]) else 0))
