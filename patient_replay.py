@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+import csv
+import io
+import math
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Iterable
+
+from schema import PatientTelemetry, TelemetryFrame
+
+
+ALIASES = {
+    "timestamp": {
+        "timestamp", "time", "datetime", "date_time", "date time", "recorded_at"
+    },
+    "minute": {"minute", "minutes", "elapsed_min", "elapsed_minutes", "relative_time"},
+    "MAP": {
+        "map", "mean arterial pressure", "mean arterial pressure map",
+        "arterial pressure mean", "nibp mean", "abp mean"
+    },
+    "HR": {"hr", "heart rate", "heart_rate", "pulse", "pulse rate"},
+    "SVV": {"svv", "stroke volume variation", "stroke_volume_variation"},
+    "EtCO2": {
+        "etco2", "etco2 mmhg", "etco2 (mmhg)", "end tidal co2",
+        "end tidal co2 mmhg", "end_tidal_co2"
+    },
+    "SpO2": {"spo2", "spo2 percent", "spo2 (%)", "oxygen saturation", "o2 sat"},
+    "CVP": {"cvp", "central venous pressure"},
+}
+
+
+@dataclass(frozen=True)
+class ReplayReport:
+    patient_id: str
+    rows_read: int
+    rows_used: int
+    rows_skipped: int
+    sampling_interval_seconds: float
+    mapped_columns: dict[str, str]
+    missing_optional_signals: list[str]
+
+
+def _normalise(value: str) -> str:
+    return " ".join(value.strip().lower().replace("_", " ").replace("-", " ").split())
+
+
+def _column_map(fieldnames: Iterable[str]) -> dict[str, str]:
+    normalised = {_normalise(name): name for name in fieldnames if name}
+    mapped: dict[str, str] = {}
+    for target, aliases in ALIASES.items():
+        for alias in aliases:
+            if alias in normalised:
+                mapped[target] = normalised[alias]
+                break
+    return mapped
+
+
+def _number(value: str | None) -> float | None:
+    if value is None or not str(value).strip():
+        return None
+    cleaned = str(value).strip().replace(",", "")
+    try:
+        number = float(cleaned)
+        return number if math.isfinite(number) else None
+    except ValueError:
+        return None
+
+
+def _timestamp_seconds(value: str | None) -> float | None:
+    if value is None or not value.strip():
+        return None
+    numeric = _number(value)
+    if numeric is not None:
+        return numeric
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def parse_csv_text(
+    csv_text: str,
+    patient_id: str = "REPLAY-001",
+    default_interval_seconds: float = 30.0,
+) -> tuple[PatientTelemetry, ReplayReport]:
+    reader = csv.DictReader(io.StringIO(csv_text))
+    if not reader.fieldnames:
+        raise ValueError("CSV must contain a header row.")
+
+    mapped = _column_map(reader.fieldnames)
+    if "MAP" not in mapped:
+        raise ValueError("CSV must contain a MAP column.")
+    if "HR" not in mapped:
+        raise ValueError("CSV must contain an HR/heart-rate column.")
+
+    rows = list(reader)
+    parsed: list[tuple[float | None, dict[str, float | None]]] = []
+    previous_time: float | None = None
+
+    for row in rows:
+        timestamp = _timestamp_seconds(row.get(mapped["timestamp"])) if "timestamp" in mapped else None
+        minute = _number(row.get(mapped["minute"])) if "minute" in mapped else None
+        values = {target: _number(row.get(column)) for target, column in mapped.items() if target not in {"timestamp", "minute"}}
+
+        if values.get("MAP") is None or values.get("HR") is None:
+            continue
+
+        if timestamp is not None:
+            if previous_time is not None and timestamp <= previous_time:
+                timestamp = None
+            else:
+                previous_time = timestamp
+
+        parsed.append((timestamp if timestamp is not None else minute, values))
+
+    if len(parsed) < 2:
+        raise ValueError("At least two usable rows with MAP and HR are required.")
+
+    has_timestamp = "timestamp" in mapped and any(item[0] is not None for item in parsed)
+    if has_timestamp:
+        first_time = parsed[0][0]
+        if first_time is None:
+            has_timestamp = False
+
+    frames: list[TelemetryFrame] = []
+    base = parsed[0][0] if has_timestamp else None
+    last_minute = -default_interval_seconds / 60.0
+
+    for index, (time_value, values) in enumerate(parsed):
+        if has_timestamp and time_value is not None and base is not None:
+            minute = (time_value - base) / 60.0
+        elif "minute" in mapped and time_value is not None:
+            minute = float(time_value)
+        else:
+            minute = index * default_interval_seconds / 60.0
+
+        if minute <= last_minute and index:
+            minute = last_minute + default_interval_seconds / 60.0
+
+        last_minute = minute
+        frames.append(
+            TelemetryFrame(
+                timestamp=float(time_value) if has_timestamp and time_value is not None else None,
+                minute=round(minute, 4),
+                MAP=values["MAP"],
+                HR=values["HR"],
+                SVV=values.get("SVV"),
+                EtCO2=values.get("EtCO2"),
+                SpO2=values.get("SpO2"),
+                CVP=values.get("CVP"),
+            )
+        )
+
+    intervals = [
+        (frames[i].minute - frames[i - 1].minute) * 60
+        for i in range(1, len(frames))
+        if frames[i].minute > frames[i - 1].minute
+    ]
+    interval = sum(intervals) / len(intervals) if intervals else default_interval_seconds
+    interval = max(0.1, min(60.0, interval))
+
+    missing = [name for name in ("SVV", "EtCO2", "SpO2", "CVP") if name not in mapped]
+    report = ReplayReport(
+        patient_id=patient_id,
+        rows_read=len(rows),
+        rows_used=len(frames),
+        rows_skipped=len(rows) - len(frames),
+        sampling_interval_seconds=round(interval, 2),
+        mapped_columns=mapped,
+        missing_optional_signals=missing,
+    )
+    return PatientTelemetry(
+        patient_id=patient_id,
+        sampling_interval_seconds=interval,
+        telemetry=frames,
+    ), report
