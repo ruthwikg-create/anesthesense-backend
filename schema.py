@@ -18,8 +18,8 @@ class TelemetryFrame(BaseModel):
     minute: float
     MAP: float = Field(ge=0, le=1000)
     HR: float = Field(ge=0, le=500)
-    SVV: float = Field(ge=0, le=150)
-    EtCO2: float = Field(ge=0, le=150)
+    SVV: float | None = Field(default=None, ge=0, le=150)
+    EtCO2: float | None = Field(default=None, ge=0, le=150)
     SpO2: float | None = Field(default=None, ge=0, le=120)
     CVP: float | None = Field(default=None, ge=-20, le=100)
     arterial_waveform: list[float] | None = Field(default=None, min_length=4, max_length=2000)
@@ -51,6 +51,7 @@ class SignalQualityReport(BaseModel):
     valid_frames: int
     rejected_frames: int
     artifact_rate: float = Field(ge=0, le=1)
+    signal_completeness: float = Field(ge=0, le=1)
     notes: list[str] = Field(default_factory=list)
 
 
@@ -67,8 +68,8 @@ class FeatureSummary(BaseModel):
     map_volatility: float = 0.0
     hr_current: float
     hr_slope_per_min: float
-    svv_current: float
-    etco2_current: float
+    svv_current: float | None = None
+    etco2_current: float | None = None
     spo2_current: float | None = None
     cvp_current: float | None = None
     arterial_waveform_range: float | None = None
