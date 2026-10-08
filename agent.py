@@ -23,6 +23,11 @@ def _slope(values, minutes):
 
 
 def preprocess(telemetry):
+    if not telemetry.telemetry:
+        raise ValueError("No telemetry frames were supplied.")
+    if len(telemetry.telemetry) < 2:
+        raise ValueError("At least two telemetry frames are required for trajectory analysis.")
+
     valid = []
     rejected = 0
     optional_fields = ("SVV", "EtCO2", "SpO2", "CVP")
@@ -41,6 +46,12 @@ def preprocess(telemetry):
         else:
             rejected += 1
 
+    if len(valid) < 2:
+        raise ValueError(
+            "Fewer than two valid telemetry frames remain after signal validation. "
+            "Check MAP/HR values and the source data."
+        )
+
     rate = rejected / len(telemetry.telemetry)
     availability = sum(
         sum(getattr(frame, field) is not None for field in optional_fields)
@@ -58,7 +69,7 @@ def preprocess(telemetry):
 
     notes = []
     if rejected:
-        notes.append("Out-of-range frames removed before inference.")
+        notes.append(f"{rejected} out-of-range frame(s) removed before inference.")
     if completeness < 1:
         missing = [
             field
@@ -150,32 +161,19 @@ def _predict(f):
 
     if f.map_current < 70 and svv_high and low_etco2:
         mechanism = "Mixed"
-        action = (
-            "Assess volume status, blood loss, anesthetic depth, and low-flow contributors; "
-            "use clinician-directed management and reassessment."
-        )
+        action = "Assess volume status, blood loss, anesthetic depth, and low-flow contributors; use clinician-directed management and reassessment."
     elif f.map_current < 70 and svv_high:
         mechanism = "Hypovolemia"
-        action = (
-            "Assess volume status and surgical blood loss; consider clinician-directed "
-            "fluid/blood management and reassess MAP/SVV."
-        )
+        action = "Assess volume status and surgical blood loss; consider clinician-directed fluid/blood management and reassess MAP/SVV."
     elif f.map_current < 70:
         mechanism = "Vasodilation"
-        action = (
-            "Assess anesthetic depth and vasodilatory causes; consider clinician-directed "
-            "hemodynamic support and reassess MAP."
-        )
+        action = "Assess anesthetic depth and vasodilatory causes; consider clinician-directed hemodynamic support and reassess MAP."
     else:
         mechanism = "Normal"
         action = "Continue routine monitoring; reassess if trajectory worsens."
 
-    confidence = 0.55
-    confidence += 0.12 * f.trend_strength
-    confidence += 0.10 * f.signal_quality.signal_completeness
-    confidence -= 0.10 * f.signal_quality.artifact_rate
+    confidence = 0.55 + 0.12 * f.trend_strength + 0.10 * f.signal_quality.signal_completeness - 0.10 * f.signal_quality.artifact_rate
     confidence = min(0.94, max(0.30, round(confidence, 3)))
-
     priority = "CRITICAL" if risk == "CRITICAL" else "HIGH" if risk == "HIGH" else "WATCH" if risk == "MODERATE" else "ROUTINE"
 
     baseline = ClinicalAssessment(
@@ -193,9 +191,8 @@ def _predict(f):
     )
     baseline.contributing_factors = build_contributors(f)
     baseline.explanation = (
-        f"Current MAP {f.map_current:.1f} mmHg; 15-minute forecast "
-        f"{f.predicted_map_15min:.1f} mmHg; trajectory {f.trajectory}; "
-        f"prototype hypotension probability {f.hypotension_probability:.0%}."
+        f"Current MAP {f.map_current:.1f} mmHg; 15-minute forecast {f.predicted_map_15min:.1f} mmHg; "
+        f"trajectory {f.trajectory}; prototype hypotension probability {f.hypotension_probability:.0%}."
     )
     return baseline
 
@@ -228,17 +225,12 @@ def _gemini(f, baseline):
         candidate = ClinicalAssessment.model_validate_json(response.text)
         return apply_safety_guardrails(baseline, candidate, f)
     except Exception as exc:
-        baseline.guardrail_note = (
-            f"Gemini unavailable; deterministic safety engine retained ({type(exc).__name__})."
-        )
+        baseline.guardrail_note = f"Generative explanation unavailable; deterministic safety engine retained ({type(exc).__name__})."
         return baseline
 
 
 def evaluate_patient_risk(telemetry):
     clean, quality = preprocess(telemetry)
-    if not clean.telemetry:
-        raise ValueError("No valid telemetry frames remain after preprocessing.")
-
     features = extract_features(clean, quality)
     assessment = _gemini(features, _predict(features))
     event_log = build_event_log(features, assessment)
