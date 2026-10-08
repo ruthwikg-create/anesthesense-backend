@@ -7,7 +7,15 @@ from statistics import mean, pstdev
 from explainability import build_contributors, build_event_log
 from forecasting import forecast_map
 from safety import apply_safety_guardrails
-from schema import ClinicalAssessment, FeatureSummary, PatientTelemetry, SignalQualityReport
+from schema import (
+    ClinicalAssessment,
+    FeatureSummary,
+    PatientTelemetry,
+    SignalQualityReport,
+    SafetyStatus,
+    calculate_haii,
+    map_deviation_percent,
+)
 
 
 MAP_HYPOTENSION = 65.0
@@ -111,6 +119,15 @@ def extract_features(data, quality):
     ecg = [x for f in frames if f.ecg_waveform for x in f.ecg_waveform]
     forecast = forecast_map(maps, minutes)
 
+    baseline_map = data.baseline.baseline_map
+    haai_score, haai_coverage = calculate_haii(
+        map_value=last.MAP,
+        hr=last.HR,
+        spo2=last.SpO2,
+        etco2=last.EtCO2,
+        bis=last.BIS,
+    )
+
     return FeatureSummary(
         map_current=last.MAP,
         map_slope_per_min=forecast.map_slope_per_min,
@@ -128,6 +145,18 @@ def extract_features(data, quality):
         etco2_current=last.EtCO2,
         spo2_current=last.SpO2,
         cvp_current=last.CVP,
+        sbp_current=last.SBP,
+        dbp_current=last.DBP,
+        calculated_map_current=last.calculated_map,
+        pulse_pressure=last.pulse_pressure,
+        shock_index=last.shock_index,
+        map_baseline=round(baseline_map, 1),
+        map_deviation_percent=round(map_deviation_percent(last.MAP, baseline_map), 1),
+        haai_score=haai_score,
+        haai_weight_coverage=haai_coverage,
+        bis_current=last.BIS,
+        tof_twitches=last.TOF_twitches,
+        tof_ratio=last.TOF_ratio,
         arterial_waveform_range=round(max(arterial) - min(arterial), 3) if arterial else None,
         ecg_waveform_std=round(pstdev(ecg), 3) if len(ecg) > 1 else None,
         map_below_65_fraction=round(sum(x < 65 for x in maps) / len(maps), 3),
@@ -135,15 +164,41 @@ def extract_features(data, quality):
     )
 
 
-def _predict(f):
+def deterministic_rule_check(features, surgical_phase):
+    """Hard-coded research safety rules; never provides medication instructions."""
+    alerts = []
+
+    if features.map_current < 55:
+        alerts.append(("CRITICAL_HYPOTENSION", f"MAP is below 55 mmHg ({features.map_current:.1f})."))
+    if (
+        features.map_deviation_percent is not None
+        and features.map_deviation_percent <= -20
+    ):
+        alerts.append(("BASELINE_MAP_DROP", f"MAP is at least 20% below the configured baseline ({features.map_deviation_percent:.1f}%)."))
+    if features.spo2_current is not None and features.spo2_current < 90:
+        alerts.append(("CRITICAL_HYPOXEMIA", f"SpO2 is below 90% ({features.spo2_current:.1f}%)."))
+    if (
+        features.bis_current is not None
+        and features.bis_current > 65
+        and surgical_phase == "MAINTENANCE"
+    ):
+        alerts.append(("AWARENESS_RISK", f"BIS is above 65 during maintenance ({features.bis_current:.1f})."))
+    if features.shock_index is not None and features.shock_index > 0.9:
+        alerts.append(("ELEVATED_SHOCK_INDEX", f"Shock index is above 0.9 ({features.shock_index:.2f})."))
+
+    return alerts
+
+
+def _predict(f, surgical_phase="MAINTENANCE"):
     probability_component = f.hypotension_probability * 45
     trend_component = max(0, -f.map_slope_per_min) * 22
     current_component = max(0, 65 - f.map_current) * 2.2
     score = min(100, probability_component + trend_component + current_component + f.map_below_65_fraction * 15)
 
-    if f.predicted_map_15min < 60:
+    overrides = deterministic_rule_check(f, surgical_phase)
+    if any(code in {"CRITICAL_HYPOTENSION", "CRITICAL_HYPOXEMIA"} for code, _ in overrides):
         risk = "CRITICAL"
-    elif f.predicted_map_15min < 65:
+    elif overrides or f.predicted_map_15min < 65:
         risk = "HIGH"
     elif score >= 40:
         risk = "MODERATE"
@@ -175,6 +230,7 @@ def _predict(f):
     confidence = 0.55 + 0.12 * f.trend_strength + 0.10 * f.signal_quality.signal_completeness - 0.10 * f.signal_quality.artifact_rate
     confidence = min(0.94, max(0.30, round(confidence, 3)))
     priority = "CRITICAL" if risk == "CRITICAL" else "HIGH" if risk == "HIGH" else "WATCH" if risk == "MODERATE" else "ROUTINE"
+    safety_status = SafetyStatus.CRITICAL if risk == "CRITICAL" else SafetyStatus.WARNING if risk == "HIGH" else SafetyStatus.STABLE
 
     baseline = ClinicalAssessment(
         hemodynamic_risk_score=round(score, 1),
@@ -188,12 +244,22 @@ def _predict(f):
         suppress_alarm=False,
         data_quality=f.signal_quality.quality,
         alert_priority=priority,
+        safety_status=safety_status,
+        deterministic_override=bool(overrides),
     )
+    if overrides:
+        baseline.guardrail_note = "Deterministic safety override: " + " ".join(f"{code}: {message}" for code, message in overrides)
     baseline.contributing_factors = build_contributors(f)
     baseline.explanation = (
         f"Current MAP {f.map_current:.1f} mmHg; 15-minute forecast {f.predicted_map_15min:.1f} mmHg; "
         f"trajectory {f.trajectory}; prototype hypotension probability {f.hypotension_probability:.0%}."
     )
+    if f.haai_score is not None:
+        baseline.explanation += f" HAII-style deterministic score: {f.haai_score:.3f} with {f.haai_weight_coverage:.0%} signal-weight coverage."
+    if f.shock_index is not None:
+        baseline.explanation += f" Shock index: {f.shock_index:.2f}."
+    if f.map_deviation_percent is not None:
+        baseline.explanation += f" MAP deviation from configured baseline: {f.map_deviation_percent:.1f}%."
     return baseline
 
 
@@ -232,7 +298,7 @@ def _gemini(f, baseline):
 def evaluate_patient_risk(telemetry):
     clean, quality = preprocess(telemetry)
     features = extract_features(clean, quality)
-    assessment = _gemini(features, _predict(features))
+    assessment = _gemini(features, _predict(features, clean.surgical_phase.value))
     event_log = build_event_log(features, assessment)
 
     pipeline = [
