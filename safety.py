@@ -11,7 +11,7 @@ def apply_safety_guardrails(
     candidate: ClinicalAssessment,
     features: FeatureSummary,
 ) -> ClinicalAssessment:
-    # The deterministic safety layer is authoritative for severity and alarm state.
+    # Deterministic severity, score, and alarm state are authoritative.
     if RISK_RANK[candidate.hypotension_risk_level] < RISK_RANK[baseline.hypotension_risk_level]:
         candidate.hypotension_risk_level = baseline.hypotension_risk_level
 
@@ -20,20 +20,28 @@ def apply_safety_guardrails(
         baseline.hemodynamic_risk_score,
     )
 
+    # Keep the displayed forecast consistent with the deterministic forecast.
+    candidate.predicted_map_15min = min(
+        candidate.predicted_map_15min,
+        baseline.predicted_map_15min,
+    )
+    candidate.predicted_map_15min = max(30.0, min(140.0, candidate.predicted_map_15min))
+
     if baseline.hypotension_risk_level in {"HIGH", "CRITICAL"}:
         candidate.suppress_alarm = False
 
-    if candidate.predicted_map_15min < 60 and candidate.hypotension_risk_level not in {"CRITICAL"}:
+    if baseline.predicted_map_15min < 60:
         candidate.hypotension_risk_level = "CRITICAL"
         candidate.suppress_alarm = False
-
-    candidate.predicted_map_15min = max(30.0, min(140.0, candidate.predicted_map_15min))
+    elif baseline.predicted_map_15min < 65:
+        candidate.hypotension_risk_level = "HIGH"
+        candidate.suppress_alarm = False
 
     notes = list(filter(None, [candidate.guardrail_note]))
     if features.signal_quality.quality == "POOR":
-        notes.append("Poor signal quality: interpret the advisory output cautiously and verify source signals.")
+        notes.append("Poor signal quality: verify source signals before interpreting the advisory output.")
     if candidate.hypotension_risk_level in {"HIGH", "CRITICAL"}:
-        notes.append("Risk level and alarm state are controlled by the deterministic safety layer.")
+        notes.append("Risk severity and alarm state are controlled by the deterministic safety layer.")
     candidate.guardrail_note = " ".join(dict.fromkeys(notes)) or None
 
     return candidate
