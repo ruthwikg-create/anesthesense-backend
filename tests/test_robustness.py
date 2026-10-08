@@ -45,3 +45,18 @@ def test_health_advertises_replay_and_guardrails():
     body = response.json()
     assert body["csv_replay"] is True
     assert body["safety_guardrails"] is True
+
+
+def test_deterministic_critical_override_cannot_be_downgraded():
+    payload = _payload([54, 53, 52, 51])
+    payload["baseline"] = {"baseline_sbp": 120, "baseline_dbp": 80, "baseline_hr": 70}
+    payload["surgical_phase"] = "MAINTENANCE"
+    payload["telemetry"][-1]["BIS"] = 70
+    response = client.post("/api/v1/predict", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assessment = body["clinical_assessment"]
+    assert assessment["hypotension_risk_level"] == "CRITICAL"
+    assert assessment["deterministic_override"] is True
+    assert assessment["suppress_alarm"] is False
+    assert body["features"]["haai_score"] is not None
