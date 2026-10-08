@@ -1542,6 +1542,30 @@ elif st.session_state.stage == "analysis":
                 display = "N/A" if value is None else f"{value:.1f}"
                 metric_card(label, display, unit)
 
+        st.markdown("### Deterministic clinical metrics")
+
+        clinical_values = [
+            ("Pulse Pressure", f.get("pulse_pressure"), "mmHg"),
+            ("Shock Index", f.get("shock_index"), "HR/SBP"),
+            ("MAP Baseline", f.get("map_baseline"), "mmHg"),
+            ("MAP Deviation", f.get("map_deviation_percent"), "%"),
+            ("HAII-style Score", f.get("haai_score"), f"{f.get('haai_weight_coverage', 0):.0%} weight coverage"),
+            ("BIS", f.get("bis_current"), "index"),
+            ("TOF Ratio", f.get("tof_ratio"), "T4/T1"),
+            ("TOF Twitches", f.get("tof_twitches"), "count"),
+        ]
+
+        clinical_cols = st.columns(4)
+        for index, (label, value, unit) in enumerate(clinical_values):
+            with clinical_cols[index % 4]:
+                if value is None:
+                    display = "N/A"
+                elif isinstance(value, float):
+                    display = f"{value:.2f}"
+                else:
+                    display = str(value)
+                metric_card(label, display, unit)
+
         st.markdown("### Safety and transparency")
 
         safe1, safe2 = st.columns(2)
