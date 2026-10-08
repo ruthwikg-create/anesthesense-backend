@@ -686,13 +686,46 @@ def render_csv_import_center():
 
     if st.session_state.csv_bytes is None:
         st.caption("No CSV imported yet.")
-        st.download_button(
-            "DOWNLOAD CSV TEMPLATE",
-            csv_template(),
-            "AnestheSense_patient_template.csv",
-            "text/csv",
-            key="csv_template_empty",
-        )
+
+        demo_col, template_col = st.columns(2)
+
+        with demo_col:
+            if st.button(
+                "LOAD BUILT-IN DEMO CSV",
+                type="secondary",
+                use_container_width=True,
+                key="load_builtin_demo_csv",
+            ):
+                rows = ["timestamp,minute,MAP,HR,SVV,EtCO2,SpO2,CVP"]
+                for i in range(41):
+                    minute = i * 0.5
+                    map_value = 88 - (26 * i / 40)
+                    hr_value = 72 + (18 * i / 40)
+                    svv_value = 9 + (11 * i / 40)
+                    etco2_value = 36 - (4 * i / 40)
+                    second = 30 if i % 2 else 0
+                    rows.append(
+                        f"2026-10-08T10:{int(minute):02d}:{second:02d},"
+                        f"{minute:.1f},{map_value:.1f},{hr_value:.1f},"
+                        f"{svv_value:.1f},{etco2_value:.1f},99,7"
+                    )
+
+                import_csv(
+                    "\\n".join(rows).encode("utf-8"),
+                    "anesthesense_demo_patient.csv",
+                )
+                st.rerun()
+
+        with template_col:
+            st.download_button(
+                "DOWNLOAD CSV TEMPLATE",
+                csv_template(),
+                "AnestheSense_patient_template.csv",
+                "text/csv",
+                use_container_width=True,
+                key="csv_template_empty",
+            )
+
         return
 
     report = st.session_state.csv_report
