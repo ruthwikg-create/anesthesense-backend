@@ -1,3 +1,5 @@
+import hashlib
+import io
 import json
 import time
 
@@ -323,6 +325,10 @@ DEFAULTS = {
     "case_started": False,
     "monitoring_complete": False,
     "alert_acknowledged": False,
+    "csv_bytes": None,
+    "csv_filename": None,
+    "csv_sha256": None,
+    "csv_error": None,
 }
 
 for key, value in DEFAULTS.items():
@@ -583,6 +589,206 @@ def make_prediction(frames):
     )
 
 
+def import_csv(raw_bytes, filename):
+    """Persist and validate CSV bytes across Streamlit reruns."""
+    if not raw_bytes:
+        st.session_state.csv_error = "The selected CSV file is empty."
+        return False
+
+    st.session_state.csv_bytes = bytes(raw_bytes)
+    st.session_state.csv_filename = filename or "patient.csv"
+    st.session_state.csv_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+    st.session_state.csv_error = None
+
+    try:
+        telemetry, report = parse_csv_bytes(
+            raw_bytes,
+            patient_id=st.session_state.patient_id,
+        )
+        st.session_state.telemetry = [
+            frame.model_dump(exclude_none=True)
+            for frame in telemetry.telemetry
+        ]
+        st.session_state.csv_report = report
+        return True
+    except ValueError as exc:
+        st.session_state.csv_error = str(exc)
+        st.session_state.csv_report = None
+        st.session_state.telemetry = None
+        return False
+
+
+def csv_template():
+    return (
+        "timestamp,minute,MAP,HR,SVV,EtCO2,SpO2,CVP\n"
+        "2026-10-08T10:00:00,0,82,76,9,36,99,7\n"
+        "2026-10-08T10:00:30,0.5,79,78,10,35,99,7\n"
+        "2026-10-08T10:01:00,1,76,80,12,35,99,7\n"
+    )
+
+
+def normalized_csv():
+    output = io.StringIO()
+    output.write("minute,MAP,HR,SVV,EtCO2,SpO2,CVP\n")
+    for frame in telemetry_frames():
+        values = [
+            frame.get("minute", ""),
+            frame.get("MAP", ""),
+            frame.get("HR", ""),
+            frame.get("SVV", ""),
+            frame.get("EtCO2", ""),
+            frame.get("SpO2", ""),
+            frame.get("CVP", ""),
+        ]
+        output.write(",".join("" if value is None else str(value) for value in values))
+        output.write("\n")
+    return output.getvalue()
+
+
+def render_csv_import_center():
+    st.markdown("### CSV Import Center")
+    st.markdown(
+        """
+        <div class="info-box">
+            <strong>Clinical telemetry CSV</strong><br>
+            Required: MAP + HR. Optional: SVV, EtCO₂, SpO₂ and CVP.
+            Timestamp/minute are optional. UTF-8, UTF-16 and CP1252 files are supported,
+            including comma, semicolon, tab and pipe delimiters.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    uploaded = st.file_uploader(
+        "Drop CSV here or click Browse files",
+        type=["csv"],
+        accept_multiple_files=False,
+        key="persistent_csv_uploader",
+        help="The file is persisted in the current case so Streamlit reruns do not lose it.",
+    )
+
+    if uploaded is not None:
+        raw = uploaded.getvalue()
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest != st.session_state.csv_sha256:
+            import_csv(raw, uploaded.name)
+
+    if st.session_state.csv_error:
+        st.error("CSV import failed: " + st.session_state.csv_error)
+        st.download_button(
+            "DOWNLOAD WORKING CSV TEMPLATE",
+            csv_template(),
+            "AnestheSense_patient_template.csv",
+            "text/csv",
+            key="csv_template_error",
+        )
+        return
+
+    if st.session_state.csv_bytes is None:
+        st.caption("No CSV imported yet.")
+        st.download_button(
+            "DOWNLOAD CSV TEMPLATE",
+            csv_template(),
+            "AnestheSense_patient_template.csv",
+            "text/csv",
+            key="csv_template_empty",
+        )
+        return
+
+    report = st.session_state.csv_report
+    if report is None:
+        return
+
+    st.success(
+        f"CSV READY · {st.session_state.csv_filename} · "
+        f"{report.rows_used} usable frames"
+    )
+    st.caption(
+        f"SHA-256: {st.session_state.csv_sha256} · "
+        f"{len(st.session_state.csv_bytes) / 1024:.1f} KB"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Rows read", report.rows_read)
+    c2.metric("Usable frames", report.rows_used)
+    c3.metric("Rows skipped", report.rows_skipped)
+    c4.metric("Sampling", f"{report.sampling_interval_seconds:.1f} s")
+
+    st.markdown("### Signal mapping")
+    mapping_cols = st.columns(6)
+    for col, signal in zip(mapping_cols, ["MAP", "HR", "SVV", "EtCO2", "SpO2", "CVP"]):
+        with col:
+            source = report.mapped_columns.get(signal)
+            metric_card(signal, "✓" if source else "—", source or "not supplied")
+
+    if report.missing_optional_signals:
+        st.info(
+            "Optional signals not present: "
+            + ", ".join(report.missing_optional_signals)
+            + ". Missing measurements are not fabricated."
+        )
+
+    quality = max(
+        0,
+        min(100, round((report.rows_used / report.rows_read) * 100))
+        if report.rows_read
+        else 0,
+    )
+    st.markdown("### Import quality")
+    st.progress(quality / 100, text=f"Usable row quality: {quality}%")
+
+    if quality >= 95:
+        st.success("IMPORT QUALITY: HIGH")
+    elif quality >= 75:
+        st.warning("IMPORT QUALITY: REVIEW")
+    else:
+        st.error("IMPORT QUALITY: POOR")
+
+    with st.expander("Preview imported data", expanded=True):
+        st.dataframe(
+            telemetry_frames()[:15],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("Detected column mapping"):
+        st.json(report.mapped_columns)
+
+    with st.expander("Normalized dataset"):
+        st.dataframe(
+            telemetry_frames(),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.download_button(
+            "DOWNLOAD NORMALIZED CSV",
+            normalized_csv(),
+            f"{st.session_state.case_id}_normalized.csv",
+            "text/csv",
+            key="download_normalized_csv",
+        )
+
+    left, right = st.columns(2)
+    with left:
+        if st.button("REPLACE CSV", use_container_width=True, key="replace_csv"):
+            st.session_state.csv_bytes = None
+            st.session_state.csv_filename = None
+            st.session_state.csv_sha256 = None
+            st.session_state.csv_report = None
+            st.session_state.csv_error = None
+            st.session_state.telemetry = None
+            st.rerun()
+
+    with right:
+        if st.button(
+            "CONTINUE WITH THIS DATA →",
+            type="primary",
+            use_container_width=True,
+            key="continue_csv_data",
+        ):
+            go_to("verify")
+
+
 # ---------------------------------------------------------------------------
 # HEADER
 # ---------------------------------------------------------------------------
@@ -718,6 +924,10 @@ if st.session_state.stage == "case":
         st.session_state.predictions = []
         st.session_state.monitoring_complete = False
         st.session_state.alert_acknowledged = False
+        st.session_state.csv_bytes = None
+        st.session_state.csv_filename = None
+        st.session_state.csv_sha256 = None
+        st.session_state.csv_error = None
         go_to("data")
 
 
@@ -775,60 +985,7 @@ elif st.session_state.stage == "data":
                 st.error(f"Backend connection failed: {exc}")
 
     elif st.session_state.data_source == "Patient CSV replay":
-        st.markdown("### Upload a de-identified monitor export")
-
-        uploaded = st.file_uploader(
-            "Choose patient CSV",
-            type=["csv"],
-            accept_multiple_files=False,
-            help="Required: MAP and HR. Optional: timestamp/minute, SVV, EtCO2, SpO2, CVP.",
-            key="case_csv_upload",
-        )
-
-        if uploaded:
-            try:
-                telemetry, report = parse_csv_bytes(
-                    uploaded.getvalue(),
-                    patient_id=st.session_state.patient_id,
-                )
-
-                st.session_state.telemetry = [
-                    frame.model_dump(exclude_none=True)
-                    for frame in telemetry.telemetry
-                ]
-                st.session_state.csv_report = report
-
-                st.success(
-                    f"{report.rows_used} usable frames imported from "
-                    f"{report.rows_read} CSV rows."
-                )
-
-                a, b, c = st.columns(3)
-                a.metric("Frames", report.rows_used)
-                b.metric(
-                    "Sampling",
-                    f"{report.sampling_interval_seconds:.1f} s",
-                )
-                c.metric(
-                    "Skipped",
-                    report.rows_skipped,
-                )
-
-                if report.missing_optional_signals:
-                    st.warning(
-                        "Missing optional signals: "
-                        + ", ".join(report.missing_optional_signals)
-                    )
-
-                with st.expander("Preview imported data", expanded=True):
-                    st.dataframe(
-                        st.session_state.telemetry[:10],
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-
-            except ValueError as exc:
-                st.error(str(exc))
+        render_csv_import_center()
 
     else:
         st.markdown("### Manual telemetry")
