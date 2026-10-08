@@ -206,3 +206,38 @@ def test_patient_csv_replay_parser():
     assert report.rows_skipped == 0
     assert report.sampling_interval_seconds == 30
     assert "MAP" in report.mapped_columns
+
+def test_patient_csv_upload_bytes_supports_utf16_and_semicolon():
+    from patient_replay import parse_csv_bytes
+
+    csv_text = """Time;MAP mmHg;HR bpm;SVV %;EtCO2;SpO2 %;CVP
+2026-10-08T10:00:00;82;76;9;36;99;7
+2026-10-08T10:00:30;79;78;10;35;99;7
+2026-10-08T10:01:00;75;81;12;34;98;6
+"""
+    telemetry, report = parse_csv_bytes(
+        csv_text.encode("utf-16"),
+        patient_id="CASE-UPLOAD",
+    )
+
+    assert telemetry.patient_id == "CASE-UPLOAD"
+    assert len(telemetry.telemetry) == 3
+    assert report.rows_used == 3
+    assert report.sampling_interval_seconds == 30
+    assert report.mapped_columns["MAP"] == "MAP mmHg"
+    assert report.mapped_columns["HR"] == "HR bpm"
+
+
+def test_patient_csv_upload_rejects_missing_required_signal():
+    from patient_replay import parse_csv_bytes
+
+    csv_text = """timestamp,MAP,SVV
+2026-10-08T10:00:00,82,9
+2026-10-08T10:00:30,79,10
+"""
+    try:
+        parse_csv_bytes(csv_text.encode("utf-8"))
+    except ValueError as exc:
+        assert "HR" in str(exc)
+    else:
+        raise AssertionError("Expected missing-HR validation error")
