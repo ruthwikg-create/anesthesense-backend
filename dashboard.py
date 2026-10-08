@@ -8,50 +8,362 @@ import streamlit as st
 from patient_replay import parse_csv_bytes
 
 
+# ---------------------------------------------------------------------------
+# PAGE CONFIGURATION
+# ---------------------------------------------------------------------------
+
 st.set_page_config(
-    page_title="AnestheSense | Intraoperative Monitor",
+    page_title="AnestheSense | Hemodynamic Intelligence",
     page_icon="🏥",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
+
+
+# ---------------------------------------------------------------------------
+# DESIGN SYSTEM
+# ---------------------------------------------------------------------------
 
 st.markdown(
     """
     <style>
-    .block-container {padding-top: 1.2rem; max-width: 1500px;}
-    .risk-card {padding: 18px; border: 1px solid #333; border-radius: 14px;}
+    :root {
+        --bg: #071018;
+        --panel: #0d1721;
+        --panel-2: #101d29;
+        --border: #223344;
+        --text: #e8f0f7;
+        --muted: #8fa2b5;
+        --cyan: #36c9d7;
+        --green: #37d39b;
+        --amber: #f2b84b;
+        --red: #ff5d67;
+    }
+
+    html, body, [class*="css"] {
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .stApp {
+        background: var(--bg);
+        color: var(--text);
+    }
+
+    .block-container {
+        max-width: 1480px;
+        padding-top: 1.2rem;
+        padding-bottom: 3rem;
+    }
+
+    [data-testid="stSidebar"] {
+        background: #08121b;
+        border-right: 1px solid var(--border);
+    }
+
+    .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 18px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: linear-gradient(135deg, #0d1924 0%, #0a141d 100%);
+        margin-bottom: 18px;
+    }
+
+    .brand {
+        font-size: 1.35rem;
+        font-weight: 800;
+        letter-spacing: .02em;
+    }
+
+    .brand span {
+        color: var(--cyan);
+    }
+
+    .subtitle {
+        color: var(--muted);
+        font-size: .78rem;
+        margin-top: 2px;
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 12px;
+        border-radius: 999px;
+        border: 1px solid #284052;
+        background: #0b1822;
+        color: #b9c9d6;
+        font-size: .78rem;
+        font-weight: 700;
+    }
+
+    .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        background: var(--green);
+        box-shadow: 0 0 10px rgba(55, 211, 155, .6);
+    }
+
+    .section-label {
+        color: var(--cyan);
+        font-size: .72rem;
+        font-weight: 800;
+        letter-spacing: .13em;
+        text-transform: uppercase;
+        margin: 4px 0 8px;
+    }
+
+    .hero {
+        padding: 28px;
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        background:
+            radial-gradient(circle at 90% 10%, rgba(54, 201, 215, .13), transparent 35%),
+            linear-gradient(145deg, #0e1b26, #09131c);
+        margin-bottom: 18px;
+    }
+
+    .hero h1 {
+        margin: 0 0 7px;
+        font-size: 2rem;
+        letter-spacing: -.03em;
+    }
+
+    .hero p {
+        color: var(--muted);
+        max-width: 800px;
+        margin: 0;
+        line-height: 1.6;
+    }
+
+    .stage-card {
+        min-height: 145px;
+        padding: 20px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: var(--panel);
+    }
+
+    .stage-card.active {
+        border-color: rgba(54, 201, 215, .65);
+        box-shadow: 0 0 0 1px rgba(54, 201, 215, .08);
+    }
+
+    .stage-number {
+        color: var(--cyan);
+        font-size: .72rem;
+        font-weight: 800;
+        letter-spacing: .1em;
+    }
+
+    .stage-title {
+        font-size: 1rem;
+        font-weight: 800;
+        margin-top: 9px;
+    }
+
+    .stage-copy {
+        color: var(--muted);
+        font-size: .78rem;
+        line-height: 1.45;
+        margin-top: 6px;
+    }
+
+    .metric-card {
+        padding: 18px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--panel);
+        min-height: 112px;
+    }
+
+    .metric-label {
+        color: var(--muted);
+        font-size: .74rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+    }
+
+    .metric-value {
+        font-size: 1.75rem;
+        font-weight: 800;
+        margin-top: 7px;
+    }
+
+    .metric-delta {
+        color: var(--muted);
+        font-size: .74rem;
+        margin-top: 5px;
+    }
+
+    .risk-critical {
+        border-color: rgba(255, 93, 103, .65);
+        background: linear-gradient(135deg, rgba(255, 93, 103, .14), #10161e);
+    }
+
+    .risk-high {
+        border-color: rgba(242, 184, 75, .65);
+        background: linear-gradient(135deg, rgba(242, 184, 75, .12), #10161e);
+    }
+
+    .risk-moderate {
+        border-color: rgba(242, 184, 75, .45);
+    }
+
+    .risk-low {
+        border-color: rgba(55, 211, 155, .45);
+    }
+
+    .alert-banner {
+        padding: 18px 20px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 93, 103, .55);
+        background: rgba(255, 93, 103, .10);
+        margin: 14px 0 18px;
+    }
+
+    .alert-title {
+        color: #ff8b91;
+        font-weight: 800;
+        font-size: 1rem;
+    }
+
+    .alert-copy {
+        color: #c9d4dd;
+        font-size: .82rem;
+        margin-top: 5px;
+    }
+
+    .good-banner {
+        padding: 16px 18px;
+        border-radius: 16px;
+        border: 1px solid rgba(55, 211, 155, .45);
+        background: rgba(55, 211, 155, .08);
+        margin: 14px 0 18px;
+    }
+
+    .info-box {
+        padding: 18px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--panel);
+        line-height: 1.6;
+    }
+
+    .timeline-item {
+        border-left: 2px solid #2a4355;
+        padding: 0 0 18px 18px;
+        margin-left: 8px;
+        color: #c9d5df;
+        font-size: .82rem;
+    }
+
+    .timeline-item:last-child {
+        border-left-color: transparent;
+    }
+
+    .timeline-dot {
+        width: 8px;
+        height: 8px;
+        background: var(--cyan);
+        border-radius: 50%;
+        display: inline-block;
+        margin-left: -24px;
+        margin-right: 12px;
+    }
+
+    .footer-note {
+        color: #687d8e;
+        font-size: .72rem;
+        text-align: center;
+        margin-top: 28px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+    }
+
+    .stButton > button {
+        border-radius: 10px;
+        font-weight: 700;
+        min-height: 42px;
+    }
+
+    div[data-testid="stFileUploader"] {
+        border: 1px dashed #365064;
+        border-radius: 16px;
+        padding: 8px;
+        background: rgba(13, 23, 33, .65);
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("AnestheSense")
-st.caption("Advanced intraoperative hemodynamic early-warning clinical decision-support prototype")
 
-API_URL = st.sidebar.text_input("Backend URL", "http://127.0.0.1:8000")
-patient_id = st.sidebar.text_input("Patient / Case ID", "OR-07")
-scenario = st.sidebar.selectbox(
-    "Simulation laboratory",
-    [
-        "Vasodilation",
-        "Hypovolemia",
-        "Hemorrhage",
-        "MixedShock",
-        "HypoxiaStress",
-        "Normotensive",
-    ],
-)
+# ---------------------------------------------------------------------------
+# SESSION STATE
+# ---------------------------------------------------------------------------
 
-st.sidebar.markdown("---")
-st.sidebar.caption("Prototype safety boundary")
-st.sidebar.info(
-    "Deterministic risk severity and alarm state remain authoritative. "
-    "Gemini, when configured, is an explanation layer only. No drug doses are generated."
-)
+DEFAULTS = {
+    "stage": "case",
+    "case_id": "OR-07",
+    "patient_id": "DEMO-001",
+    "procedure": "General Surgery",
+    "data_source": "Synthetic simulation",
+    "scenario": "Hypovolemia",
+    "telemetry": None,
+    "csv_report": None,
+    "prediction": None,
+    "predictions": [],
+    "case_started": False,
+    "monitoring_complete": False,
+    "alert_acknowledged": False,
+}
+
+for key, value in DEFAULTS.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
+# ---------------------------------------------------------------------------
+# CONSTANTS
+# ---------------------------------------------------------------------------
+
+STAGES = [
+    ("01", "Case", "Create or select the case."),
+    ("02", "Data", "Import or generate telemetry."),
+    ("03", "Verify", "Confirm signal integrity."),
+    ("04", "Monitor", "Process the physiological trajectory."),
+    ("05", "Analysis", "Review forecast and risk."),
+    ("06", "Report", "Summarize and export the case."),
+]
+
+SCENARIOS = [
+    "Vasodilation",
+    "Hypovolemia",
+    "Hemorrhage",
+    "MixedShock",
+    "HypoxiaStress",
+    "Normotensive",
+]
+
+
+# ---------------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------------
+
+def api_url():
+    return st.session_state.get("api_url", "http://127.0.0.1:8000").rstrip("/")
 
 
 def post_predict(payload):
     response = requests.post(
-        f"{API_URL.rstrip('/')}/api/v1/predict",
+        f"{api_url()}/api/v1/predict",
         json=payload,
         timeout=30,
     )
@@ -59,565 +371,1190 @@ def post_predict(payload):
     return response.json()
 
 
-def render_assessment(data, observed_maps, chart_key="assessment_chart"):
-    a = data["clinical_assessment"]
-    f = data["features"]
+def risk_class(level):
+    return {
+        "CRITICAL": "risk-critical",
+        "HIGH": "risk-high",
+        "MODERATE": "risk-moderate",
+        "LOW": "risk-low",
+    }.get(level, "")
 
-    cols = st.columns(5)
-    cols[0].metric("Risk score", f"{a['hemodynamic_risk_score']:.0f}/100")
-    cols[1].metric("Risk level", a["hypotension_risk_level"])
-    cols[2].metric("MAP now", f"{f['map_current']:.1f}")
-    cols[3].metric("MAP +15 min", f"{a['predicted_map_15min']:.1f}")
-    cols[4].metric("Hypotension probability", f"{f['hypotension_probability']:.0%}")
 
-    if data["alert_triggered"]:
-        st.error(
-            f"🔴 {a['alert_priority']} ALERT — {a['primary_risk']} · "
-            f"trajectory: {f['trajectory']}"
+def stage_index():
+    names = [item[1].lower() for item in STAGES]
+    return names.index(st.session_state.stage.lower())
+
+
+def go_to(stage):
+    st.session_state.stage = stage
+    st.rerun()
+
+
+def metric_card(label, value, detail="", extra_class=""):
+    st.markdown(
+        f"""
+        <div class="metric-card {extra_class}">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">{value}</div>
+            <div class="metric-delta">{detail}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_topbar():
+    case = st.session_state.case_id
+    status = "MONITORING" if st.session_state.case_started else "READY"
+
+    st.markdown(
+        f"""
+        <div class="topbar">
+            <div>
+                <div class="brand">Anesthe<span>Sense</span></div>
+                <div class="subtitle">Intraoperative Hemodynamic Intelligence</div>
+            </div>
+            <div>
+                <span class="status-pill">
+                    <span class="dot"></span>
+                    {status}
+                </span>
+                <span style="margin-left:10px;color:#8fa2b5;font-size:.78rem;">
+                    CASE {case}
+                </span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_progress():
+    current = stage_index()
+    cols = st.columns(len(STAGES))
+
+    for index, ((number, title, copy), col) in enumerate(zip(STAGES, cols)):
+        active = "active" if index == current else ""
+        completed = "✓" if index < current else number
+
+        with col:
+            st.markdown(
+                f"""
+                <div class="stage-card {active}">
+                    <div class="stage-number">{completed}</div>
+                    <div class="stage-title">{title}</div>
+                    <div class="stage-copy">{copy}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def render_footer():
+    st.markdown(
+        """
+        <div class="footer-note">
+            AnestheSense is a research/demo clinical decision-support prototype.
+            It is not clinically validated and must not be used to direct patient care.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_plot(observed, predicted10=None, predicted15=None, title="Hemodynamic trajectory", key="trajectory"):
+    fig = go.Figure()
+
+    x_observed = list(range(-len(observed) + 1, 1))
+
+    fig.add_trace(
+        go.Scatter(
+            x=x_observed,
+            y=observed,
+            mode="lines+markers",
+            name="Observed MAP",
+            line={"width": 3},
         )
-    elif a["hypotension_risk_level"] == "MODERATE":
-        st.warning("🟠 WATCH — deterioration should be reassessed.")
-    else:
-        st.success("🟢 No HIGH/CRITICAL alert from the prototype engine.")
+    )
 
-    left, right = st.columns([1.6, 1])
-
-    with left:
-        fig = go.Figure()
-        x = list(range(-len(observed_maps) + 1, 1))
-        fig.add_trace(
-            go.Scatter(x=x, y=observed_maps, mode="lines+markers", name="Observed MAP")
-        )
+    if predicted10 is not None and predicted15 is not None:
         fig.add_trace(
             go.Scatter(
                 x=[0, 10, 15],
-                y=[f["map_current"], f["predicted_map_10min"], f["predicted_map_15min"]],
+                y=[observed[-1], predicted10, predicted15],
                 mode="lines+markers",
                 name="Forecast",
-                line={"dash": "dash"},
+                line={"dash": "dash", "width": 2},
             )
         )
-        fig.add_hline(y=65, line_dash="dot", annotation_text="MAP 65")
-        fig.add_hline(y=60, line_dash="dot", annotation_text="MAP 60")
-        fig.update_layout(
-            title="Dynamic MAP trajectory",
-            xaxis_title="Relative time (min)",
-            yaxis_title="MAP (mmHg)",
-            height=400,
-            margin={"l": 20, "r": 20, "t": 50, "b": 20},
-        )
-        st.plotly_chart(fig, use_container_width=True, key=chart_key)
 
-    with right:
-        st.subheader("Mechanism")
-        st.metric("Likely mechanism", a["suspected_mechanism"])
-        st.metric("MAP slope", f"{f['map_slope_per_min']:.2f} mmHg/min")
-        st.metric("Trend strength", f"{f['trend_strength']:.0%}")
-        st.metric("Signal quality", a["data_quality"])
-
-    st.subheader("Why the system raised this state")
-    for item in a["contributing_factors"]:
-        st.write("•", item)
-
-    st.subheader("Clinical advisory")
-    st.info(a["suggested_action"])
-    st.caption(a["explanation"])
-
-    if a.get("guardrail_note"):
-        st.warning("Safety guardrail: " + a["guardrail_note"])
-
-    st.subheader("Event timeline")
-    for event in data.get("event_log", []):
-        st.write("•", event)
-
-    with st.expander("Feature matrix"):
-        st.json(f)
-
-    with st.expander("Multi-agent pipeline"):
-        for step in data["pipeline"]:
-            st.write("✓", step)
-
-    st.download_button(
-        "Export audit JSON",
-        json.dumps(data, indent=2),
-        f"AnestheSense_{patient_id}_audit.json",
-        "application/json",
-        key=f"audit_{chart_key}",
+    fig.add_hline(
+        y=65,
+        line_dash="dot",
+        annotation_text="MAP 65",
+        annotation_position="top left",
+    )
+    fig.add_hline(
+        y=60,
+        line_dash="dot",
+        annotation_text="MAP 60",
+        annotation_position="bottom left",
     )
 
-
-def render_csv_replay_result(result, frames, patient_id):
-    a = result["clinical_assessment"]
-    f = result["features"]
-
-    st.success("Patient replay complete.")
-    st.subheader("Replay assessment")
-
-    cols = st.columns(5)
-    cols[0].metric("Risk", a["hypotension_risk_level"])
-    cols[1].metric("Risk score", f"{a['hemodynamic_risk_score']:.0f}/100")
-    cols[2].metric("MAP now", f"{f['map_current']:.1f} mmHg")
-    cols[3].metric("MAP +15 min", f"{a['predicted_map_15min']:.1f} mmHg")
-    cols[4].metric("Confidence", f"{a['confidence_score']:.0%}")
-
-    if result["alert_triggered"]:
-        st.error(
-            f"🔴 {a['alert_priority']} ALERT — {a['primary_risk']} · "
-            f"predicted MAP {a['predicted_map_15min']:.1f} mmHg"
-        )
-    elif a["hypotension_risk_level"] == "MODERATE":
-        st.warning("🟠 WATCH — deterioration should be reassessed.")
-    else:
-        st.success("🟢 No HIGH/CRITICAL alert from the prototype engine.")
-
-    render_assessment(
-        result,
-        [frame["MAP"] for frame in frames],
-        chart_key="csv_final_assessment_chart",
+    fig.update_layout(
+        title=title,
+        height=420,
+        margin={"l": 15, "r": 15, "t": 55, "b": 25},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": "#cbd6df"},
+        xaxis={
+            "title": "Relative time (min)",
+            "gridcolor": "#1d2c39",
+            "zerolinecolor": "#344b5d",
+        },
+        yaxis={
+            "title": "MAP (mmHg)",
+            "gridcolor": "#1d2c39",
+            "range": [30, 110],
+        },
+        legend={"orientation": "h", "y": 1.12},
     )
 
+    st.plotly_chart(fig, use_container_width=True, key=key)
 
-def actual_future_map(frames, now_minute, horizon):
+
+def telemetry_frames():
+    return st.session_state.telemetry or []
+
+
+def current_prediction():
+    return st.session_state.prediction
+
+
+def calculate_future_map(frames, now_minute, horizon):
     target = now_minute + horizon
-    candidates = [frame for frame in frames if frame["minute"] >= target]
+    candidates = [f for f in frames if f["minute"] >= target]
     if not candidates:
         return None
-    return min(candidates, key=lambda frame: abs(frame["minute"] - target))["MAP"]
+    return min(
+        candidates,
+        key=lambda f: abs(f["minute"] - target),
+    )["MAP"]
 
 
-def evaluate_replay(frames, predictions):
-    errors_10 = []
-    errors_15 = []
+def replay_mae(frames, predictions, horizon):
+    errors = []
 
     for item in predictions:
-        now = item["now"]
-        result = item["result"]
-        actual10 = actual_future_map(frames, now, 10)
-        actual15 = actual_future_map(frames, now, 15)
-
-        if actual10 is not None:
-            errors_10.append(
-                abs(result["features"]["predicted_map_10min"] - actual10)
-            )
-        if actual15 is not None:
-            errors_15.append(
-                abs(result["features"]["predicted_map_15min"] - actual15)
-            )
-
-    mae10 = sum(errors_10) / len(errors_10) if errors_10 else None
-    mae15 = sum(errors_15) / len(errors_15) if errors_15 else None
-    return mae10, mae15
-
-
-def run_patient_replay(telemetry, patient_id, speed=10.0):
-    chart = st.empty()
-    metrics = st.empty()
-    status = st.empty()
-    final = None
-    predictions = []
-
-    for index in range(2, len(telemetry) + 1):
-        prefix = telemetry[:index]
-        payload = {
-            "patient_id": patient_id,
-            "sampling_interval_seconds": max(
-                0.1,
-                float(prefix[1]["minute"] - prefix[0]["minute"]) * 60,
-            ),
-            "telemetry": prefix,
-        }
-
-        try:
-            result = post_predict(payload)
-        except requests.RequestException as exc:
-            st.error(f"Backend connection failed: {exc}")
-            return None, predictions
-
-        final = result
-        predictions.append({"now": prefix[-1]["minute"], "result": result})
-
-        with metrics.container():
-            a = result["clinical_assessment"]
-            f = result["features"]
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Risk", a["hypotension_risk_level"])
-            c2.metric("MAP", f"{f['map_current']:.1f} mmHg")
-            c3.metric("Forecast MAP", f"{a['predicted_map_15min']:.1f} mmHg")
-            c4.metric("Probability", f"{f['hypotension_probability']:.0%}")
-
-        with status.container():
-            if result["alert_triggered"]:
-                st.error(
-                    f"🔴 {a['alert_priority']} ALERT — review the patient's clinical state."
-                )
-            else:
-                st.info(
-                    f"Monitoring — {f['trajectory']} · "
-                    f"{a['suspected_mechanism']}"
-                )
-
-        with chart.container():
-            fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=[frame["minute"] for frame in prefix],
-                    y=[frame["MAP"] for frame in prefix],
-                    mode="lines+markers",
-                    name="Observed MAP",
-                )
-            )
-            fig.add_hline(y=65, line_dash="dot", annotation_text="MAP 65")
-            fig.add_hline(y=60, line_dash="dot", annotation_text="MAP 60")
-            fig.update_layout(
-                title=f"Patient replay — {patient_id}",
-                xaxis_title="Time (min)",
-                yaxis_title="MAP (mmHg)",
-                yaxis_range=[30, 110],
-                height=420,
-            )
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                key=f"patient_replay_chart_{index}",
-            )
-
-        time.sleep(max(0.03, 0.8 / speed))
-
-    return final, predictions
-
-
-def run_simulation():
-    try:
-        sim = requests.post(
-            f"{API_URL.rstrip('/')}/api/v1/simulate",
-            json={
-                "patient_id": patient_id,
-                "scenario": scenario,
-                "frames": 31,
-                "interval_seconds": 30,
-            },
-            timeout=30,
+        actual = calculate_future_map(
+            frames,
+            item["minute"],
+            horizon,
         )
-        sim.raise_for_status()
-        return sim.json()["telemetry"]
-    except requests.RequestException as exc:
-        st.error(f"Backend connection failed: {exc}")
-        return None
+
+        if actual is None:
+            continue
+
+        key = f"predicted_map_{horizon}min"
+        predicted = item["result"]["features"].get(key)
+
+        if predicted is not None:
+            errors.append(abs(predicted - actual))
+
+    return sum(errors) / len(errors) if errors else None
 
 
-tab_live, tab_csv, tab_manual, tab_about = st.tabs(
-    ["Live simulation", "Patient CSV replay", "Manual telemetry", "System"]
-)
+def make_prediction(frames):
+    interval = 30.0
 
-with tab_live:
-    st.subheader("Intraoperative Simulation Laboratory")
-    st.write(
-        "Generate a deterministic synthetic case, then replay it through the same "
-        "prediction endpoint used for live telemetry."
+    if len(frames) >= 2:
+        interval = max(
+            0.1,
+            (frames[1]["minute"] - frames[0]["minute"]) * 60,
+        )
+
+    return post_predict(
+        {
+            "patient_id": st.session_state.patient_id,
+            "sampling_interval_seconds": interval,
+            "telemetry": frames,
+        }
     )
 
-    if st.button("Run 15-minute simulation", type="primary"):
-        telemetry = run_simulation()
 
-        if telemetry:
-            chart = st.empty()
-            metrics = st.empty()
-            status = st.empty()
-            last_result = None
-            maps = []
+# ---------------------------------------------------------------------------
+# HEADER
+# ---------------------------------------------------------------------------
 
-            for i in range(2, len(telemetry) + 1):
-                prefix = telemetry[:i]
-                payload = {
-                    "patient_id": patient_id,
-                    "sampling_interval_seconds": 30,
-                    "telemetry": prefix,
-                }
+render_topbar()
+render_progress()
 
-                try:
-                    result = post_predict(payload)
-                except requests.RequestException as exc:
-                    st.error(f"Backend connection failed: {exc}")
-                    break
 
-                last_result = result
-                maps = [frame["MAP"] for frame in prefix]
-                a = result["clinical_assessment"]
+# ---------------------------------------------------------------------------
+# SIDEBAR
+# ---------------------------------------------------------------------------
 
-                with chart.container():
-                    fig = go.Figure()
-                    fig.add_trace(
-                        go.Scatter(
-                            x=[f["minute"] for f in prefix],
-                            y=maps,
-                            mode="lines+markers",
-                            name="Observed MAP",
-                        )
-                    )
-                    fig.add_hline(y=65, line_dash="dot", annotation_text="MAP 65")
-                    fig.add_hline(y=60, line_dash="dot", annotation_text="MAP 60")
-                    fig.update_layout(
-                        title=f"Live replay — {patient_id} — {scenario}",
-                        xaxis_title="Simulation time (min)",
-                        yaxis_title="MAP (mmHg)",
-                        yaxis_range=[30, 110],
-                        height=420,
-                    )
-                    st.plotly_chart(
-                        fig,
-                        use_container_width=True,
-                        key=f"live_simulation_chart_{i}",
-                    )
+with st.sidebar:
+    st.markdown("### System configuration")
 
-                with metrics.container():
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Risk", a["hypotension_risk_level"])
-                    c2.metric("Score", f"{a['hemodynamic_risk_score']:.0f}/100")
-                    c3.metric("Forecast MAP", f"{a['predicted_map_15min']:.1f}")
-                    c4.metric(
-                        "Probability",
-                        f"{result['features']['hypotension_probability']:.0%}",
-                    )
+    st.session_state.api_url = st.text_input(
+        "Backend URL",
+        value=st.session_state.get("api_url", "http://127.0.0.1:8000"),
+    )
 
-                if result["alert_triggered"]:
-                    status.error(
-                        f"🔴 {a['alert_priority']} — {a['suspected_mechanism']} · "
-                        f"predicted MAP {a['predicted_map_15min']:.1f}"
-                    )
-                else:
-                    status.info(
-                        f"Monitoring · {a['suspected_mechanism']} · "
-                        f"trajectory {result['features']['trajectory']}"
-                    )
+    st.markdown("---")
+    st.markdown("### Case status")
 
-                time.sleep(0.12)
+    st.write(f"**Case:** {st.session_state.case_id}")
+    st.write(f"**Patient:** {st.session_state.patient_id}")
+    st.write(f"**Source:** {st.session_state.data_source}")
 
-            if last_result:
-                st.success("Simulation replay complete.")
-                render_assessment(
-                    last_result,
-                    maps,
-                    chart_key="simulation_final_assessment_chart",
+    if st.session_state.telemetry:
+        st.write(f"**Frames:** {len(st.session_state.telemetry)}")
+
+    st.markdown("---")
+    st.caption("Safety boundary")
+    st.info(
+        "Deterministic risk severity and alarm state remain authoritative. "
+        "Optional generative AI is an explanation layer only. No medication dosing "
+        "or autonomous treatment is generated."
+    )
+
+
+# ---------------------------------------------------------------------------
+# STAGE 01 — CASE
+# ---------------------------------------------------------------------------
+
+if st.session_state.stage == "case":
+    st.markdown(
+        """
+        <div class="hero">
+            <div class="section-label">01 / Case setup</div>
+            <h1>Start a monitoring case</h1>
+            <p>
+                Establish the case context first. AnestheSense then moves through
+                data acquisition, signal verification, trajectory monitoring,
+                explainable analysis, and case reporting.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    left, right = st.columns([1.3, 1])
+
+    with left:
+        st.markdown("### Case information")
+
+        st.session_state.case_id = st.text_input(
+            "Case ID",
+            st.session_state.case_id,
+        )
+
+        st.session_state.patient_id = st.text_input(
+            "Patient / Demo ID",
+            st.session_state.patient_id,
+        )
+
+        st.session_state.procedure = st.selectbox(
+            "Procedure context",
+            [
+                "General Surgery",
+                "Orthopedic Surgery",
+                "Neurosurgery",
+                "Cardiothoracic Surgery",
+                "Abdominal Surgery",
+                "Other",
+            ],
+            index=[
+                "General Surgery",
+                "Orthopedic Surgery",
+                "Neurosurgery",
+                "Cardiothoracic Surgery",
+                "Abdominal Surgery",
+                "Other",
+            ].index(st.session_state.procedure),
+        )
+
+    with right:
+        st.markdown("### Data source")
+
+        source = st.radio(
+            "Choose how this case will receive data",
+            [
+                "Synthetic simulation",
+                "Patient CSV replay",
+                "Manual telemetry",
+            ],
+            index=[
+                "Synthetic simulation",
+                "Patient CSV replay",
+                "Manual telemetry",
+            ].index(st.session_state.data_source),
+        )
+
+        st.session_state.data_source = source
+
+        if source == "Synthetic simulation":
+            st.session_state.scenario = st.selectbox(
+                "Simulation scenario",
+                SCENARIOS,
+                index=SCENARIOS.index(st.session_state.scenario),
+            )
+
+    st.markdown("---")
+
+    if st.button(
+        "START NEW CASE →",
+        type="primary",
+        use_container_width=True,
+        key="start_case",
+    ):
+        st.session_state.case_started = True
+        st.session_state.telemetry = None
+        st.session_state.csv_report = None
+        st.session_state.prediction = None
+        st.session_state.predictions = []
+        st.session_state.monitoring_complete = False
+        st.session_state.alert_acknowledged = False
+        go_to("data")
+
+
+# ---------------------------------------------------------------------------
+# STAGE 02 — DATA ACQUISITION
+# ---------------------------------------------------------------------------
+
+elif st.session_state.stage == "data":
+    st.markdown(
+        """
+        <div class="hero">
+            <div class="section-label">02 / Data acquisition</div>
+            <h1>Bring the physiological data into the case</h1>
+            <p>
+                AnestheSense can work with a deterministic simulation, a
+                de-identified CSV replay, or manually entered telemetry.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.session_state.data_source == "Synthetic simulation":
+        st.markdown("### Simulation laboratory")
+
+        st.info(
+            f"Scenario selected: **{st.session_state.scenario}**. "
+            "The backend generates deterministic synthetic telemetry for reproducible demonstrations."
+        )
+
+        if st.button(
+            "GENERATE TELEMETRY →",
+            type="primary",
+            use_container_width=True,
+            key="generate_sim",
+        ):
+            try:
+                response = requests.post(
+                    f"{api_url()}/api/v1/simulate",
+                    json={
+                        "patient_id": st.session_state.patient_id,
+                        "scenario": st.session_state.scenario,
+                        "frames": 31,
+                        "interval_seconds": 30,
+                    },
+                    timeout=30,
+                )
+                response.raise_for_status()
+                st.session_state.telemetry = response.json()["telemetry"]
+                st.session_state.prediction = None
+                st.success(
+                    f"Generated {len(st.session_state.telemetry)} telemetry frames."
+                )
+            except requests.RequestException as exc:
+                st.error(f"Backend connection failed: {exc}")
+
+    elif st.session_state.data_source == "Patient CSV replay":
+        st.markdown("### Upload a de-identified monitor export")
+
+        uploaded = st.file_uploader(
+            "Choose patient CSV",
+            type=["csv"],
+            accept_multiple_files=False,
+            help="Required: MAP and HR. Optional: timestamp/minute, SVV, EtCO2, SpO2, CVP.",
+            key="case_csv_upload",
+        )
+
+        if uploaded:
+            try:
+                telemetry, report = parse_csv_bytes(
+                    uploaded.getvalue(),
+                    patient_id=st.session_state.patient_id,
                 )
 
-
-with tab_csv:
-    st.subheader("Patient Data Replay")
-    st.write(
-        "Upload a de-identified monitor export. The file is replayed frame-by-frame "
-        "through the same deterministic prediction engine used by the API."
-    )
-
-    uploaded = st.file_uploader(
-        "Choose a patient CSV file",
-        type=["csv"],
-        accept_multiple_files=False,
-        help="Required: MAP and HR. Optional: timestamp/minute, SVV, EtCO2, SpO2, CVP.",
-    )
-
-    csv_patient_id = st.text_input(
-        "CSV Patient / Case ID",
-        "CASE-001",
-        key="csv_patient_id",
-    )
-
-    if uploaded:
-        try:
-            file_bytes = uploaded.getvalue()
-            st.caption(
-                f"Selected: {uploaded.name} • {len(file_bytes) / 1024:.1f} KB"
-            )
-
-            telemetry, report = parse_csv_bytes(
-                file_bytes,
-                patient_id=csv_patient_id,
-            )
-
-            st.success(
-                f"CSV validated: {report.rows_used} usable rows from "
-                f"{report.rows_read}. {report.rows_skipped} rows skipped."
-            )
-
-            preview_rows = [
-                frame.model_dump(exclude_none=True)
-                for frame in telemetry.telemetry[:10]
-            ]
-
-            with st.expander("Preview imported data", expanded=True):
-                st.dataframe(
-                    preview_rows,
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-            info1, info2, info3, info4 = st.columns(4)
-            info1.metric("Frames", report.rows_used)
-            info2.metric("Sampling interval", f"{report.sampling_interval_seconds:.1f} s")
-            info3.metric("Core signals", "MAP + HR")
-            info4.metric(
-                "Optional signals",
-                f"{4 - len(report.missing_optional_signals)}/4",
-            )
-
-            if report.missing_optional_signals:
-                st.warning(
-                    "Unavailable optional signals: "
-                    + ", ".join(report.missing_optional_signals)
-                    + ". The system will not invent them."
-                )
-
-            with st.expander("Imported column mapping"):
-                st.json(report.mapped_columns)
-
-            st.download_button(
-                "Download CSV template",
-                "timestamp,minute,MAP,HR,SVV,EtCO2,SpO2,CVP\n"
-                "2026-10-08T10:00:00,0,82,76,9,36,99,7\n"
-                "2026-10-08T10:00:30,0.5,79,78,10,35,99,7\n",
-                "AnestheSense_patient_template.csv",
-                "text/csv",
-                key="csv_template_download",
-            )
-
-            speed = st.slider(
-                "Replay speed",
-                1.0,
-                30.0,
-                10.0,
-                1.0,
-                key="csv_replay_speed",
-            )
-
-            if st.button(
-                "Start patient replay",
-                type="primary",
-                key="start_csv_replay",
-            ):
-                frames = [
+                st.session_state.telemetry = [
                     frame.model_dump(exclude_none=True)
                     for frame in telemetry.telemetry
                 ]
+                st.session_state.csv_report = report
 
-                final, predictions = run_patient_replay(
-                    frames,
-                    csv_patient_id,
-                    speed,
+                st.success(
+                    f"{report.rows_used} usable frames imported from "
+                    f"{report.rows_read} CSV rows."
                 )
 
-                if final:
-                    render_csv_replay_result(
-                        final,
-                        frames,
-                        csv_patient_id,
+                a, b, c = st.columns(3)
+                a.metric("Frames", report.rows_used)
+                b.metric(
+                    "Sampling",
+                    f"{report.sampling_interval_seconds:.1f} s",
+                )
+                c.metric(
+                    "Skipped",
+                    report.rows_skipped,
+                )
+
+                if report.missing_optional_signals:
+                    st.warning(
+                        "Missing optional signals: "
+                        + ", ".join(report.missing_optional_signals)
                     )
 
-                    mae10, mae15 = evaluate_replay(frames, predictions)
+                with st.expander("Preview imported data", expanded=True):
+                    st.dataframe(
+                        st.session_state.telemetry[:10],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
-                    with st.expander("Retrospective replay validation"):
-                        c1, c2 = st.columns(2)
-                        c1.metric(
-                            "MAP +10 min MAE",
-                            "N/A" if mae10 is None else f"{mae10:.2f} mmHg",
-                        )
-                        c2.metric(
-                            "MAP +15 min MAE",
-                            "N/A" if mae15 is None else f"{mae15:.2f} mmHg",
-                        )
-                        st.caption(
-                            "These are retrospective replay errors for this file, "
-                            "not clinical validation or calibration."
-                        )
+            except ValueError as exc:
+                st.error(str(exc))
 
-        except ValueError as exc:
-            st.error(str(exc))
+    else:
+        st.markdown("### Manual telemetry")
 
+        st.info(
+            "Use this mode to stress-test the prediction engine with a controlled "
+            "six-frame physiological trajectory."
+        )
 
-with tab_manual:
-    st.subheader("Manual telemetry stress test")
-    maps = st.slider("Current MAP", 40, 110, 70)
-    map_slope = st.slider(
-        "Synthetic MAP trend (mmHg/min)",
-        -3.0,
-        2.0,
-        -0.5,
-        0.1,
-    )
-    hr = st.slider("HR (bpm)", 40, 180, 90)
-    svv = st.slider("SVV (%)", 0, 35, 12)
-    etco2 = st.slider("EtCO₂ (mmHg)", 15, 60, 34)
-    spo2 = st.slider("SpO₂ (%)", 70, 100, 98)
+        map_now = st.slider("MAP (mmHg)", 40, 110, 70, key="manual_map")
+        map_slope = st.slider(
+            "MAP slope (mmHg/min)",
+            -3.0,
+            2.0,
+            -0.5,
+            0.1,
+            key="manual_slope",
+        )
+        hr = st.slider("HR (bpm)", 40, 180, 90, key="manual_hr")
+        svv = st.slider("SVV (%)", 0, 35, 12, key="manual_svv")
+        etco2 = st.slider("EtCO₂ (mmHg)", 15, 60, 34, key="manual_etco2")
+        spo2 = st.slider("SpO₂ (%)", 70, 100, 98, key="manual_spo2")
 
-    manual_maps = [maps + map_slope * i for i in range(-5, 1)]
-
-    payload = {
-        "patient_id": patient_id,
-        "sampling_interval_seconds": 60,
-        "telemetry": [
+        st.session_state.telemetry = [
             {
                 "minute": i - 5,
-                "MAP": round(value, 1),
+                "MAP": round(map_now + map_slope * i, 1),
                 "HR": hr,
                 "SVV": svv,
                 "EtCO2": etco2,
                 "SpO2": spo2,
             }
-            for i, value in enumerate(manual_maps)
-        ],
-    }
+            for i in range(6)
+        ]
 
-    if st.button("Analyze manual telemetry"):
-        try:
-            result = post_predict(payload)
-            render_assessment(
-                result,
-                manual_maps,
-                chart_key="manual_assessment_chart",
-            )
-        except requests.RequestException as exc:
-            st.error(f"Backend connection failed: {exc}")
+        st.dataframe(
+            st.session_state.telemetry,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if st.session_state.telemetry:
+        st.markdown("---")
+
+        if st.button(
+            "CONTINUE TO SIGNAL VERIFICATION →",
+            type="primary",
+            use_container_width=True,
+            key="data_continue",
+        ):
+            go_to("verify")
 
 
-with tab_about:
-    st.subheader("AnestheSense v4 architecture")
-    st.code(
+# ---------------------------------------------------------------------------
+# STAGE 03 — SIGNAL VERIFICATION
+# ---------------------------------------------------------------------------
+
+elif st.session_state.stage == "verify":
+    frames = telemetry_frames()
+
+    st.markdown(
         """
-Telemetry
-   ↓
-Signal Preprocessor Agent
-   ├─ artifact rejection
-   ├─ signal quality
-   └─ waveform features
-   ↓
-Predictive Analytics Agent
-   ├─ trend
-   ├─ acceleration
-   ├─ volatility
-   ├─ 10/15-min MAP forecast
-   └─ hypotension probability
-   ↓
-Clinical Advisory Agent
-   ├─ risk severity
-   ├─ mechanism hypothesis
-   ├─ contributing factors
-   └─ clinician-directed guidance
-   ↓
-Safety Guardrail
-   ├─ severity cannot be downgraded
-   ├─ HIGH/CRITICAL alarm cannot be suppressed
-   └─ no medication dosing
-   ↓
-Clinician Dashboard + Audit Trail
+        <div class="hero">
+            <div class="section-label">03 / Signal verification</div>
+            <h1>Verify what the engine received</h1>
+            <p>
+                The system checks completeness and displays the imported trajectory
+                before the prediction workflow begins. Optional signals are never fabricated.
+            </p>
+        </div>
         """,
-        language="text",
-    )
-    st.warning(
-        "Research/demo prototype only. Outputs are not clinically validated and must "
-        "not be used to direct patient care."
+        unsafe_allow_html=True,
     )
 
+    if not frames:
+        st.warning("No telemetry is available for this case.")
+        if st.button("← Return to data acquisition", key="verify_back_empty"):
+            go_to("data")
+    else:
+        latest = frames[-1]
 
-st.divider()
-st.caption(
-    "AnestheSense is a research/demo CDS prototype. It is not clinically validated, "
-    "does not provide autonomous treatment, and must not be used to direct patient care."
-)
+        signal_names = [
+            ("MAP", "mmHg", "MAP"),
+            ("HR", "bpm", "HR"),
+            ("SVV", "%", "SVV"),
+            ("EtCO₂", "mmHg", "EtCO2"),
+            ("SpO₂", "%", "SpO2"),
+            ("CVP", "mmHg", "CVP"),
+        ]
+
+        cols = st.columns(6)
+
+        for col, (label, unit, key) in zip(cols, signal_names):
+            value = latest.get(key)
+
+            with col:
+                if value is None:
+                    metric_card(
+                        label,
+                        "N/A",
+                        "not supplied",
+                    )
+                else:
+                    metric_card(
+                        label,
+                        f"{value:.1f}",
+                        unit,
+                    )
+
+        st.markdown("### MAP trajectory received")
+        render_plot(
+            [frame["MAP"] for frame in frames],
+            title="Pre-analysis MAP trajectory",
+            key="verification_map_chart",
+        )
+
+        available = []
+        missing = []
+
+        for _, _, key in signal_names:
+            if any(frame.get(key) is not None for frame in frames):
+                available.append(key)
+            else:
+                missing.append(key)
+
+        a, b = st.columns(2)
+
+        with a:
+            st.markdown("### Available signals")
+            for signal in available:
+                st.write(f"✓ {signal}")
+
+        with b:
+            st.markdown("### Not supplied")
+            for signal in missing:
+                st.write(f"○ {signal}")
+
+        st.markdown("---")
+
+        back, begin = st.columns(2)
+
+        with back:
+            if st.button(
+                "← BACK TO DATA",
+                use_container_width=True,
+                key="verify_back",
+            ):
+                go_to("data")
+
+        with begin:
+            if st.button(
+                "BEGIN HEMODYNAMIC MONITORING →",
+                type="primary",
+                use_container_width=True,
+                key="begin_monitoring",
+            ):
+                go_to("monitor")
+
+
+# ---------------------------------------------------------------------------
+# STAGE 04 — MONITOR
+# ---------------------------------------------------------------------------
+
+elif st.session_state.stage == "monitor":
+    frames = telemetry_frames()
+
+    st.markdown(
+        """
+        <div class="hero">
+            <div class="section-label">04 / Monitoring</div>
+            <h1>Process the hemodynamic trajectory</h1>
+            <p>
+                The telemetry is replayed through the same prediction endpoint used
+                by the API. The latest deterministic assessment becomes the basis
+                for the analysis stage.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not frames:
+        st.error("No telemetry is available.")
+        if st.button("← Return to data"):
+            go_to("data")
+    else:
+        st.markdown("### Monitoring workstation")
+
+        progress = st.progress(0)
+        monitor_status = st.empty()
+        chart_area = st.empty()
+        metrics_area = st.empty()
+
+        predictions = []
+
+        # Replay all available frames when this stage is entered.
+        # A minimum of two frames is required by the prediction API.
+        for index in range(2, len(frames) + 1):
+            prefix = frames[:index]
+
+            try:
+                result = make_prediction(prefix)
+            except requests.RequestException as exc:
+                st.error(f"Backend connection failed: {exc}")
+                st.stop()
+
+            predictions.append(
+                {
+                    "minute": prefix[-1]["minute"],
+                    "result": result,
+                }
+            )
+
+            a = result["clinical_assessment"]
+            f = result["features"]
+
+            with metrics_area.container():
+                c1, c2, c3, c4 = st.columns(4)
+
+                c1.metric(
+                    "Current MAP",
+                    f"{f['map_current']:.1f} mmHg",
+                )
+                c2.metric(
+                    "Predicted +15 min",
+                    f"{a['predicted_map_15min']:.1f} mmHg",
+                )
+                c3.metric(
+                    "Risk",
+                    a["hypotension_risk_level"],
+                )
+                c4.metric(
+                    "Confidence",
+                    f"{a['confidence_score']:.0%}",
+                )
+
+            with chart_area.container():
+                render_plot(
+                    [frame["MAP"] for frame in prefix],
+                    f["predicted_map_10min"],
+                    f["predicted_map_15min"],
+                    title=f"Live case trajectory — {st.session_state.case_id}",
+                    key=f"monitor_chart_{index}",
+                )
+
+            monitor_status.info(
+                f"Frame {index}/{len(frames)} · "
+                f"{f['trajectory']} · "
+                f"{a['suspected_mechanism']}"
+            )
+
+            progress.progress(index / len(frames))
+
+            # Fast visual replay; this is not intended to represent real-time physiology.
+            time.sleep(0.05)
+
+        st.session_state.prediction = predictions[-1]["result"]
+        st.session_state.predictions = predictions
+        st.session_state.monitoring_complete = True
+
+        final = st.session_state.prediction
+        final_a = final["clinical_assessment"]
+
+        if final["alert_triggered"]:
+            st.markdown(
+                f"""
+                <div class="alert-banner">
+                    <div class="alert-title">
+                        {final_a["alert_priority"]} ALERT — {final_a["primary_risk"]}
+                    </div>
+                    <div class="alert-copy">
+                        Predicted MAP at +15 min:
+                        <strong>{final_a["predicted_map_15min"]:.1f} mmHg</strong>.
+                        Clinical review is required.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """
+                <div class="good-banner">
+                    Monitoring completed without a HIGH/CRITICAL alert.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        if st.button(
+            "CONTINUE TO ANALYSIS →",
+            type="primary",
+            use_container_width=True,
+            key="monitor_continue",
+        ):
+            go_to("analysis")
+
+
+# ---------------------------------------------------------------------------
+# STAGE 05 — ANALYSIS
+# ---------------------------------------------------------------------------
+
+elif st.session_state.stage == "analysis":
+    result = current_prediction()
+    frames = telemetry_frames()
+
+    st.markdown(
+        """
+        <div class="hero">
+            <div class="section-label">05 / Explainable analysis</div>
+            <h1>Understand the predicted trajectory</h1>
+            <p>
+                AnestheSense separates the deterministic prediction from the
+                explanation layer. The assessment below describes why the system
+                entered its current state.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if result is None:
+        st.error("No completed prediction is available.")
+        if st.button("← Return to monitoring"):
+            go_to("monitor")
+    else:
+        a = result["clinical_assessment"]
+        f = result["features"]
+        level = a["hypotension_risk_level"]
+
+        if level in {"CRITICAL", "HIGH"}:
+            st.markdown(
+                f"""
+                <div class="alert-banner">
+                    <div class="alert-title">
+                        {a["alert_priority"]} — {a["primary_risk"]}
+                    </div>
+                    <div class="alert-copy">
+                        Current MAP <strong>{f["map_current"]:.1f}</strong> mmHg ·
+                        Forecast +15 min <strong>{a["predicted_map_15min"]:.1f}</strong> mmHg ·
+                        Trajectory <strong>{f["trajectory"]}</strong>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f"""
+                <div class="good-banner">
+                    Current risk state: <strong>{level}</strong> ·
+                    trajectory: <strong>{f["trajectory"]}</strong>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+
+        with c1:
+            metric_card(
+                "Current MAP",
+                f"{f['map_current']:.1f}",
+                "mmHg",
+            )
+
+        with c2:
+            metric_card(
+                "MAP +10 min",
+                f"{f['predicted_map_10min']:.1f}",
+                "forecast",
+            )
+
+        with c3:
+            metric_card(
+                "MAP +15 min",
+                f"{f['predicted_map_15min']:.1f}",
+                "forecast",
+            )
+
+        with c4:
+            metric_card(
+                "Risk score",
+                f"{a['hemodynamic_risk_score']:.0f}/100",
+                level,
+                risk_class(level),
+            )
+
+        with c5:
+            metric_card(
+                "Confidence",
+                f"{a['confidence_score']:.0%}",
+                a["data_quality"],
+            )
+
+        left, right = st.columns([1.7, 1])
+
+        with left:
+            render_plot(
+                [frame["MAP"] for frame in frames],
+                f["predicted_map_10min"],
+                f["predicted_map_15min"],
+                title="Hemodynamic trajectory and forecast",
+                key="analysis_trajectory_chart",
+            )
+
+        with right:
+            st.markdown("### Physiological pattern")
+            metric_card(
+                "Likely mechanism",
+                a["suspected_mechanism"],
+                "hypothesis, not diagnosis",
+            )
+
+            metric_card(
+                "MAP slope",
+                f"{f['map_slope_per_min']:.2f}",
+                "mmHg/min",
+            )
+
+            metric_card(
+                "Trend strength",
+                f"{f['trend_strength']:.0%}",
+                f["trajectory"],
+            )
+
+        st.markdown("### Why the system is concerned")
+
+        factors = a.get("contributing_factors", [])
+
+        if factors:
+            factor_cols = st.columns(min(3, len(factors)))
+
+            for index, factor in enumerate(factors):
+                with factor_cols[index % len(factor_cols)]:
+                    st.markdown(
+                        f"""
+                        <div class="info-box">
+                            <strong>{index + 1}.</strong> {factor}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.info("No additional contributing factors were returned.")
+
+        st.markdown("### Clinician review")
+
+        st.markdown(
+            f"""
+            <div class="info-box">
+                <strong>System advisory</strong><br><br>
+                {a["suggested_action"]}<br><br>
+                <span style="color:#8fa2b5;">
+                    {a["explanation"]}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if a.get("guardrail_note"):
+            st.warning(
+                "Safety guardrail: " + a["guardrail_note"]
+            )
+
+        if a.get("secondary_risk"):
+            st.info(
+                "Secondary signal: " + a["secondary_risk"]
+            )
+
+        st.markdown("### Current physiological values")
+
+        values = [
+            ("MAP", f["map_current"], "mmHg"),
+            ("HR", f["hr_current"], "bpm"),
+            ("SVV", f["svv_current"], "%"),
+            ("EtCO₂", f["etco2_current"], "mmHg"),
+            ("SpO₂", f["spo2_current"], "%"),
+            ("CVP", f["cvp_current"], "mmHg"),
+        ]
+
+        cols = st.columns(6)
+
+        for col, (label, value, unit) in zip(cols, values):
+            with col:
+                display = "N/A" if value is None else f"{value:.1f}"
+                metric_card(label, display, unit)
+
+        st.markdown("### Safety and transparency")
+
+        safe1, safe2 = st.columns(2)
+
+        with safe1:
+            st.info(
+                "The deterministic risk engine remains authoritative. "
+                "HIGH/CRITICAL states cannot be downgraded or silently suppressed."
+            )
+
+        with safe2:
+            st.info(
+                "Mechanism labels are physiological hypotheses. "
+                "They are not diagnoses and do not replace clinician assessment."
+            )
+
+        back, report = st.columns(2)
+
+        with back:
+            if st.button(
+                "← BACK TO MONITORING",
+                use_container_width=True,
+                key="analysis_back",
+            ):
+                go_to("monitor")
+
+        with report:
+            if st.button(
+                "CONTINUE TO CASE REPORT →",
+                type="primary",
+                use_container_width=True,
+                key="analysis_report",
+            ):
+                go_to("report")
+
+
+# ---------------------------------------------------------------------------
+# STAGE 06 — REPORT
+# ---------------------------------------------------------------------------
+
+elif st.session_state.stage == "report":
+    result = current_prediction()
+    frames = telemetry_frames()
+    predictions = st.session_state.predictions
+
+    st.markdown(
+        """
+        <div class="hero">
+            <div class="section-label">06 / Case report</div>
+            <h1>Case summary and audit trail</h1>
+            <p>
+                This final screen consolidates the trajectory, risk assessment,
+                contributing factors, event timeline, and retrospective replay
+                metrics into one exportable research/demo record.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if result is None:
+        st.error("No prediction is available for this case.")
+    else:
+        a = result["clinical_assessment"]
+        f = result["features"]
+
+        st.markdown("### Case summary")
+
+        c1, c2, c3, c4 = st.columns(4)
+
+        with c1:
+            metric_card(
+                "Case",
+                st.session_state.case_id,
+                st.session_state.procedure,
+            )
+
+        with c2:
+            metric_card(
+                "Frames",
+                len(frames),
+                st.session_state.data_source,
+            )
+
+        with c3:
+            metric_card(
+                "Peak risk",
+                a["hypotension_risk_level"],
+                f["trajectory"],
+                risk_class(a["hypotension_risk_level"]),
+            )
+
+        with c4:
+            metric_card(
+                "Final MAP",
+                f"{f['map_current']:.1f}",
+                "mmHg",
+            )
+
+        st.markdown("### Final trajectory")
+
+        render_plot(
+            [frame["MAP"] for frame in frames],
+            f["predicted_map_10min"],
+            f["predicted_map_15min"],
+            title="Case trajectory",
+            key="report_trajectory_chart",
+        )
+
+        st.markdown("### Event timeline")
+
+        events = result.get("event_log", [])
+
+        if events:
+            for event in events:
+                st.markdown(
+                    f"""
+                    <div class="timeline-item">
+                        <span class="timeline-dot"></span>
+                        {event}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.info("No event log was returned.")
+
+        st.markdown("### Retrospective replay validation")
+
+        mae10 = replay_mae(frames, predictions, 10)
+        mae15 = replay_mae(frames, predictions, 15)
+
+        v1, v2, v3 = st.columns(3)
+
+        with v1:
+            metric_card(
+                "MAP +10 min MAE",
+                "N/A" if mae10 is None else f"{mae10:.2f}",
+                "mmHg",
+            )
+
+        with v2:
+            metric_card(
+                "MAP +15 min MAE",
+                "N/A" if mae15 is None else f"{mae15:.2f}",
+                "mmHg",
+            )
+
+        with v3:
+            metric_card(
+                "Signal quality",
+                a["data_quality"],
+                f"{f['signal_quality']['signal_completeness']:.0%} complete",
+            )
+
+        st.caption(
+            "These replay metrics are dataset-specific retrospective errors. "
+            "They are not clinical validation, calibration, or a prospective performance claim."
+        )
+
+        st.markdown("### Audit record")
+
+        audit = {
+            "case_id": st.session_state.case_id,
+            "patient_id": st.session_state.patient_id,
+            "procedure": st.session_state.procedure,
+            "data_source": st.session_state.data_source,
+            "prediction": result,
+            "replay_validation": {
+                "map_plus_10_min_mae": mae10,
+                "map_plus_15_min_mae": mae15,
+            },
+            "telemetry_frames": frames,
+        }
+
+        st.download_button(
+            "DOWNLOAD CASE AUDIT JSON",
+            json.dumps(audit, indent=2),
+            f"AnestheSense_{st.session_state.case_id}_case.json",
+            "application/json",
+            use_container_width=True,
+            key="download_case_audit",
+        )
+
+        st.markdown("### Multi-agent processing path")
+
+        pipeline = result.get("pipeline", [])
+
+        if pipeline:
+            pcols = st.columns(len(pipeline))
+
+            for col, item in zip(pcols, pipeline):
+                with col:
+                    st.markdown(
+                        f"""
+                        <div class="stage-card">
+                            <div class="stage-number">AGENT</div>
+                            <div class="stage-title">{item}</div>
+                            <div class="stage-copy">
+                                Completed as part of the deterministic case analysis workflow.
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+        st.markdown("### Safety boundary")
+
+        st.warning(
+            "Research/demo prototype only. Outputs are not clinically validated, "
+            "do not constitute medical advice, and must not be used to direct patient care."
+        )
+
+        left, right = st.columns(2)
+
+        with left:
+            if st.button(
+                "← RETURN TO ANALYSIS",
+                use_container_width=True,
+                key="report_back",
+            ):
+                go_to("analysis")
+
+        with right:
+            if st.button(
+                "START NEW CASE",
+                type="primary",
+                use_container_width=True,
+                key="new_case",
+            ):
+                for key, value in DEFAULTS.items():
+                    st.session_state[key] = value
+                go_to("case")
+
+
+# ---------------------------------------------------------------------------
+# FOOTER
+# ---------------------------------------------------------------------------
+
+render_footer()
