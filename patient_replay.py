@@ -16,11 +16,16 @@ ALIASES = {
     "timestamp": {"timestamp", "time", "datetime", "date_time", "date time", "recorded_at", "recorded time", "date", "datetime local", "date/time"},
     "minute": {"minute", "minutes", "elapsed_min", "elapsed_minutes", "relative_time", "elapsed time", "time_min", "time minutes"},
     "MAP": {"map", "mean arterial pressure", "mean arterial pressure map", "arterial pressure mean", "nibp mean", "abp mean", "map mmhg", "map mm hg", "mean arterial pressure mmhg", "mean map"},
+    "SBP": {"sbp", "systolic blood pressure", "systolic", "systolic bp", "abp systolic", "nibp systolic", "sys bp", "systolic blood pressure mmhg"},
+    "DBP": {"dbp", "diastolic blood pressure", "diastolic", "diastolic bp", "abp diastolic", "nibp diastolic", "dia bp", "diastolic blood pressure mmhg"},
     "HR": {"hr", "heart rate", "heart_rate", "pulse", "pulse rate", "hr bpm", "heart rate bpm", "pulse bpm"},
     "SVV": {"svv", "stroke volume variation", "stroke_volume_variation", "svv percent", "svv %", "stroke volume variation percent"},
     "EtCO2": {"etco2", "etco2 mmhg", "etco2 (mmhg)", "end tidal co2", "end tidal co2 mmhg", "end_tidal_co2", "et co2"},
     "SpO2": {"spo2", "spo2 percent", "spo2 (%)", "oxygen saturation", "o2 sat", "spo2 %", "spo2 percentage", "oxygen saturation percent"},
     "CVP": {"cvp", "central venous pressure", "cvp mmhg", "central venous pressure mmhg"},
+    "BIS": {"bis", "bispectral index", "bis index", "bis score"},
+    "TOF_twitches": {"tof twitches", "tof twitch count", "train of four twitches", "tof count"},
+    "TOF_ratio": {"tof ratio", "train of four ratio", "tof recovery ratio"},
 }
 
 
@@ -125,8 +130,8 @@ def parse_csv_text(csv_text: str, patient_id: str = "REPLAY-001", default_interv
         raise ValueError("CSV must contain a header row.")
 
     mapped = _column_map(reader.fieldnames)
-    if "MAP" not in mapped:
-        raise ValueError("CSV must contain a MAP column (for example MAP, Mean Arterial Pressure, or ABP Mean).")
+    if "MAP" not in mapped and not {"SBP", "DBP"}.issubset(mapped):
+        raise ValueError("CSV must contain MAP or both SBP and DBP columns.")
     if "HR" not in mapped:
         raise ValueError("CSV must contain an HR column (for example HR, Heart Rate, or Pulse).")
 
@@ -140,6 +145,11 @@ def parse_csv_text(csv_text: str, patient_id: str = "REPLAY-001", default_interv
         timestamp = _timestamp_seconds(row.get(mapped["timestamp"])) if "timestamp" in mapped else None
         minute = _number(row.get(mapped["minute"])) if "minute" in mapped else None
         values = {target: _number(row.get(column)) for target, column in mapped.items() if target not in {"timestamp", "minute"}}
+
+        if values.get("MAP") is None and values.get("SBP") is not None and values.get("DBP") is not None:
+            sbp, dbp = values["SBP"], values["DBP"]
+            if sbp > dbp:
+                values["MAP"] = (sbp + 2 * dbp) / 3.0
 
         if values.get("MAP") is None or values.get("HR") is None:
             skipped += 1
@@ -195,6 +205,11 @@ def parse_csv_text(csv_text: str, patient_id: str = "REPLAY-001", default_interv
             EtCO2=values.get("EtCO2"),
             SpO2=values.get("SpO2"),
             CVP=values.get("CVP"),
+            SBP=values.get("SBP"),
+            DBP=values.get("DBP"),
+            BIS=values.get("BIS"),
+            TOF_twitches=int(values["TOF_twitches"]) if values.get("TOF_twitches") is not None else None,
+            TOF_ratio=values.get("TOF_ratio"),
         ))
 
     intervals = [(frames[i].minute - frames[i - 1].minute) * 60 for i in range(1, len(frames)) if frames[i].minute > frames[i - 1].minute]
