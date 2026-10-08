@@ -1,4 +1,3 @@
-import io
 import json
 import time
 
@@ -10,39 +9,44 @@ from patient_replay import parse_csv_bytes
 
 
 st.set_page_config(
-    page_title="AnestheSense | Clinician Monitor",
-    page_icon="A",
+    page_title="AnestheSense | Intraoperative Monitor",
+    page_icon="🏥",
     layout="wide",
-    initial_sidebar_state="collapsed",
 )
 
 st.markdown(
     """
     <style>
-    .block-container {padding-top: 1rem; max-width: 1500px;}
-    div[data-testid="stMetric"] {padding: 0.35rem 0.5rem;}
-    .clinician-title {font-size: 2rem; font-weight: 700; margin-bottom: 0;}
-    .muted {color: #6b7280;}
+    .block-container {padding-top: 1.2rem; max-width: 1500px;}
+    .risk-card {padding: 18px; border: 1px solid #333; border-radius: 14px;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="clinician-title">AnestheSense</div>', unsafe_allow_html=True)
-st.caption("Intraoperative hemodynamic early-warning CDS prototype")
+st.title("AnestheSense")
+st.caption("Advanced intraoperative hemodynamic early-warning clinical decision-support prototype")
 
-with st.sidebar:
-    st.subheader("Connection")
-    API_URL = st.text_input("Backend URL", "http://127.0.0.1:8000")
-    st.caption("For research/demo use. Do not connect to patient care without appropriate validation and oversight.")
+API_URL = st.sidebar.text_input("Backend URL", "http://127.0.0.1:8000")
+patient_id = st.sidebar.text_input("Patient / Case ID", "OR-07")
+scenario = st.sidebar.selectbox(
+    "Simulation laboratory",
+    [
+        "Vasodilation",
+        "Hypovolemia",
+        "Hemorrhage",
+        "MixedShock",
+        "HypoxiaStress",
+        "Normotensive",
+    ],
+)
 
-    st.divider()
-    st.subheader("Data source")
-    source = st.radio(
-        "Choose input",
-        ["Patient data file", "Synthetic simulation", "Manual check"],
-        label_visibility="collapsed",
-    )
+st.sidebar.markdown("---")
+st.sidebar.caption("Prototype safety boundary")
+st.sidebar.info(
+    "Deterministic risk severity and alarm state remain authoritative. "
+    "Gemini, when configured, is an explanation layer only. No drug doses are generated."
+)
 
 
 def post_predict(payload):
@@ -55,131 +59,122 @@ def post_predict(payload):
     return response.json()
 
 
-def status_banner(data):
+def render_assessment(data, observed_maps, chart_key="assessment_chart"):
     a = data["clinical_assessment"]
     f = data["features"]
-    level = a["hypotension_risk_level"]
 
-    if level == "CRITICAL":
-        st.error(f"CRITICAL — predicted MAP {a['predicted_map_15min']:.1f} mmHg at +15 min")
-    elif level == "HIGH":
-        st.error(f"HIGH RISK — predicted MAP {a['predicted_map_15min']:.1f} mmHg at +15 min")
-    elif level == "MODERATE":
-        st.warning("WATCH — hemodynamic deterioration may be developing")
+    cols = st.columns(5)
+    cols[0].metric("Risk score", f"{a['hemodynamic_risk_score']:.0f}/100")
+    cols[1].metric("Risk level", a["hypotension_risk_level"])
+    cols[2].metric("MAP now", f"{f['map_current']:.1f}")
+    cols[3].metric("MAP +15 min", f"{a['predicted_map_15min']:.1f}")
+    cols[4].metric("Hypotension probability", f"{f['hypotension_probability']:.0%}")
+
+    if data["alert_triggered"]:
+        st.error(
+            f"🔴 {a['alert_priority']} ALERT — {a['primary_risk']} · "
+            f"trajectory: {f['trajectory']}"
+        )
+    elif a["hypotension_risk_level"] == "MODERATE":
+        st.warning("🟠 WATCH — deterioration should be reassessed.")
     else:
-        st.success("STABLE — no HIGH/CRITICAL alert from the prototype engine")
+        st.success("🟢 No HIGH/CRITICAL alert from the prototype engine.")
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Risk", level)
-    c2.metric("Risk score", f"{a['hemodynamic_risk_score']:.0f}/100")
-    c3.metric("MAP now", f"{f['map_current']:.1f} mmHg")
-    c4.metric("MAP +15 min", f"{a['predicted_map_15min']:.1f} mmHg")
-    c5.metric("Confidence", f"{a['confidence_score']:.0%}")
-
-
-def trajectory_chart(observed_frames, result):
-    f = result["features"]
-    observed_x = [frame["minute"] for frame in observed_frames]
-    observed_y = [frame["MAP"] for frame in observed_frames]
-    now = observed_x[-1]
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=observed_x,
-            y=observed_y,
-            mode="lines+markers",
-            name="Observed MAP",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[now, now + 10, now + 15],
-            y=[f["map_current"], f["predicted_map_10min"], f["predicted_map_15min"]],
-            mode="lines+markers",
-            name="Forecast",
-            line={"dash": "dash"},
-        )
-    )
-    fig.add_hline(y=65, line_dash="dot", annotation_text="65 mmHg")
-    fig.add_hline(y=60, line_dash="dot", annotation_text="60 mmHg")
-    fig.update_layout(
-        title="Hemodynamic trajectory",
-        xaxis_title="Time (min)",
-        yaxis_title="MAP (mmHg)",
-        height=390,
-        margin={"l": 20, "r": 20, "t": 55, "b": 20},
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def clinician_view(result, frames):
-    status_banner(result)
-    a = result["clinical_assessment"]
-    f = result["features"]
-
-    left, right = st.columns([1.7, 1])
+    left, right = st.columns([1.6, 1])
 
     with left:
-        trajectory_chart(frames, result)
+        fig = go.Figure()
+        x = list(range(-len(observed_maps) + 1, 1))
+        fig.add_trace(
+            go.Scatter(x=x, y=observed_maps, mode="lines+markers", name="Observed MAP")
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[0, 10, 15],
+                y=[f["map_current"], f["predicted_map_10min"], f["predicted_map_15min"]],
+                mode="lines+markers",
+                name="Forecast",
+                line={"dash": "dash"},
+            )
+        )
+        fig.add_hline(y=65, line_dash="dot", annotation_text="MAP 65")
+        fig.add_hline(y=60, line_dash="dot", annotation_text="MAP 60")
+        fig.update_layout(
+            title="Dynamic MAP trajectory",
+            xaxis_title="Relative time (min)",
+            yaxis_title="MAP (mmHg)",
+            height=400,
+            margin={"l": 20, "r": 20, "t": 50, "b": 20},
+        )
+        st.plotly_chart(fig, use_container_width=True, key=chart_key)
 
     with right:
-        st.subheader("Clinical context")
-        st.metric("Likely pattern", a["suspected_mechanism"])
-        st.metric("Trajectory", f["trajectory"])
+        st.subheader("Mechanism")
+        st.metric("Likely mechanism", a["suspected_mechanism"])
+        st.metric("MAP slope", f"{f['map_slope_per_min']:.2f} mmHg/min")
+        st.metric("Trend strength", f"{f['trend_strength']:.0%}")
         st.metric("Signal quality", a["data_quality"])
-        st.metric("Signal completeness", f"{f['signal_quality']['signal_completeness']:.0%}")
 
-        if a.get("secondary_risk"):
-            st.info(a["secondary_risk"])
-
-    st.subheader("What the system detected")
+    st.subheader("Why the system raised this state")
     for item in a["contributing_factors"]:
         st.write("•", item)
 
-    st.subheader("Clinician-directed review")
+    st.subheader("Clinical advisory")
     st.info(a["suggested_action"])
+    st.caption(a["explanation"])
 
     if a.get("guardrail_note"):
-        st.warning(a["guardrail_note"])
+        st.warning("Safety guardrail: " + a["guardrail_note"])
 
-    st.caption(
-        "This output is decision support only. Confirm the source signals and clinical context before acting."
+    st.subheader("Event timeline")
+    for event in data.get("event_log", []):
+        st.write("•", event)
+
+    with st.expander("Feature matrix"):
+        st.json(f)
+
+    with st.expander("Multi-agent pipeline"):
+        for step in data["pipeline"]:
+            st.write("✓", step)
+
+    st.download_button(
+        "Export audit JSON",
+        json.dumps(data, indent=2),
+        f"AnestheSense_{patient_id}_audit.json",
+        "application/json",
+        key=f"audit_{chart_key}",
     )
 
 
-def research_view(result, frames, patient_id):
+def render_csv_replay_result(result, frames, patient_id):
     a = result["clinical_assessment"]
     f = result["features"]
 
-    with st.expander("Research / validation details"):
-        st.write("### Prediction details")
-        st.json(
-            {
-                "patient_id": patient_id,
-                "frames_processed": len(frames),
-                "current_map": f["map_current"],
-                "predicted_map_10min": f["predicted_map_10min"],
-                "predicted_map_15min": f["predicted_map_15min"],
-                "prototype_hypotension_probability": f["hypotension_probability"],
-                "map_slope_per_min": f["map_slope_per_min"],
-                "trend_strength": f["trend_strength"],
-                "signal_quality": f["signal_quality"],
-            }
-        )
-        st.write("### Event timeline")
-        for event in result.get("event_log", []):
-            st.write("•", event)
-        st.write("### Pipeline")
-        for step in result["pipeline"]:
-            st.write("✓", step)
+    st.success("Patient replay complete.")
+    st.subheader("Replay assessment")
 
-        st.download_button(
-            "Export audit JSON",
-            json.dumps(result, indent=2),
-            f"AnestheSense_{patient_id}_audit.json",
-            "application/json",
+    cols = st.columns(5)
+    cols[0].metric("Risk", a["hypotension_risk_level"])
+    cols[1].metric("Risk score", f"{a['hemodynamic_risk_score']:.0f}/100")
+    cols[2].metric("MAP now", f"{f['map_current']:.1f} mmHg")
+    cols[3].metric("MAP +15 min", f"{a['predicted_map_15min']:.1f} mmHg")
+    cols[4].metric("Confidence", f"{a['confidence_score']:.0%}")
+
+    if result["alert_triggered"]:
+        st.error(
+            f"🔴 {a['alert_priority']} ALERT — {a['primary_risk']} · "
+            f"predicted MAP {a['predicted_map_15min']:.1f} mmHg"
         )
+    elif a["hypotension_risk_level"] == "MODERATE":
+        st.warning("🟠 WATCH — deterioration should be reassessed.")
+    else:
+        st.success("🟢 No HIGH/CRITICAL alert from the prototype engine.")
+
+    render_assessment(
+        result,
+        [frame["MAP"] for frame in frames],
+        chart_key="csv_final_assessment_chart",
+    )
 
 
 def actual_future_map(frames, now_minute, horizon):
@@ -201,19 +196,23 @@ def evaluate_replay(frames, predictions):
         actual15 = actual_future_map(frames, now, 15)
 
         if actual10 is not None:
-            errors_10.append(abs(result["features"]["predicted_map_10min"] - actual10))
+            errors_10.append(
+                abs(result["features"]["predicted_map_10min"] - actual10)
+            )
         if actual15 is not None:
-            errors_15.append(abs(result["features"]["predicted_map_15min"] - actual15))
+            errors_15.append(
+                abs(result["features"]["predicted_map_15min"] - actual15)
+            )
 
     mae10 = sum(errors_10) / len(errors_10) if errors_10 else None
     mae15 = sum(errors_15) / len(errors_15) if errors_15 else None
     return mae10, mae15
 
 
-def run_replay(telemetry, patient_id, speed=10.0):
+def run_patient_replay(telemetry, patient_id, speed=10.0):
     chart = st.empty()
-    status = st.empty()
     metrics = st.empty()
+    status = st.empty()
     final = None
     predictions = []
 
@@ -221,7 +220,10 @@ def run_replay(telemetry, patient_id, speed=10.0):
         prefix = telemetry[:index]
         payload = {
             "patient_id": patient_id,
-            "sampling_interval_seconds": max(0.1, float(prefix[1]["minute"] - prefix[0]["minute"]) * 60),
+            "sampling_interval_seconds": max(
+                0.1,
+                float(prefix[1]["minute"] - prefix[0]["minute"]) * 60,
+            ),
             "telemetry": prefix,
         }
 
@@ -240,31 +242,170 @@ def run_replay(telemetry, patient_id, speed=10.0):
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Risk", a["hypotension_risk_level"])
             c2.metric("MAP", f"{f['map_current']:.1f} mmHg")
-            c3.metric("Forecast +15", f"{a['predicted_map_15min']:.1f} mmHg")
-            c4.metric("Confidence", f"{a['confidence_score']:.0%}")
+            c3.metric("Forecast MAP", f"{a['predicted_map_15min']:.1f} mmHg")
+            c4.metric("Probability", f"{f['hypotension_probability']:.0%}")
 
         with status.container():
             if result["alert_triggered"]:
-                st.error(f"{a['alert_priority']} ALERT — review the patient's clinical state.")
+                st.error(
+                    f"🔴 {a['alert_priority']} ALERT — review the patient's clinical state."
+                )
             else:
-                st.info(f"Monitoring — {f['trajectory']}")
+                st.info(
+                    f"Monitoring — {f['trajectory']} · "
+                    f"{a['suspected_mechanism']}"
+                )
 
         with chart.container():
-            trajectory_chart(prefix, result)
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=[frame["minute"] for frame in prefix],
+                    y=[frame["MAP"] for frame in prefix],
+                    mode="lines+markers",
+                    name="Observed MAP",
+                )
+            )
+            fig.add_hline(y=65, line_dash="dot", annotation_text="MAP 65")
+            fig.add_hline(y=60, line_dash="dot", annotation_text="MAP 60")
+            fig.update_layout(
+                title=f"Patient replay — {patient_id}",
+                xaxis_title="Time (min)",
+                yaxis_title="MAP (mmHg)",
+                yaxis_range=[30, 110],
+                height=420,
+            )
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                key=f"patient_replay_chart_{index}",
+            )
 
         time.sleep(max(0.03, 0.8 / speed))
 
     return final, predictions
 
 
-# ---------------------------------------------------------------------------
-# Patient data mode
-# ---------------------------------------------------------------------------
-if source == "Patient data file":
-    st.subheader("Patient data replay")
+def run_simulation():
+    try:
+        sim = requests.post(
+            f"{API_URL.rstrip('/')}/api/v1/simulate",
+            json={
+                "patient_id": patient_id,
+                "scenario": scenario,
+                "frames": 31,
+                "interval_seconds": 30,
+            },
+            timeout=30,
+        )
+        sim.raise_for_status()
+        return sim.json()["telemetry"]
+    except requests.RequestException as exc:
+        st.error(f"Backend connection failed: {exc}")
+        return None
+
+
+tab_live, tab_csv, tab_manual, tab_about = st.tabs(
+    ["Live simulation", "Patient CSV replay", "Manual telemetry", "System"]
+)
+
+with tab_live:
+    st.subheader("Intraoperative Simulation Laboratory")
     st.write(
-        "Upload a de-identified monitor export. AnestheSense replays it frame-by-frame "
-        "through the same prediction engine used by the API."
+        "Generate a deterministic synthetic case, then replay it through the same "
+        "prediction endpoint used for live telemetry."
+    )
+
+    if st.button("Run 15-minute simulation", type="primary"):
+        telemetry = run_simulation()
+
+        if telemetry:
+            chart = st.empty()
+            metrics = st.empty()
+            status = st.empty()
+            last_result = None
+            maps = []
+
+            for i in range(2, len(telemetry) + 1):
+                prefix = telemetry[:i]
+                payload = {
+                    "patient_id": patient_id,
+                    "sampling_interval_seconds": 30,
+                    "telemetry": prefix,
+                }
+
+                try:
+                    result = post_predict(payload)
+                except requests.RequestException as exc:
+                    st.error(f"Backend connection failed: {exc}")
+                    break
+
+                last_result = result
+                maps = [frame["MAP"] for frame in prefix]
+                a = result["clinical_assessment"]
+
+                with chart.container():
+                    fig = go.Figure()
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[f["minute"] for f in prefix],
+                            y=maps,
+                            mode="lines+markers",
+                            name="Observed MAP",
+                        )
+                    )
+                    fig.add_hline(y=65, line_dash="dot", annotation_text="MAP 65")
+                    fig.add_hline(y=60, line_dash="dot", annotation_text="MAP 60")
+                    fig.update_layout(
+                        title=f"Live replay — {patient_id} — {scenario}",
+                        xaxis_title="Simulation time (min)",
+                        yaxis_title="MAP (mmHg)",
+                        yaxis_range=[30, 110],
+                        height=420,
+                    )
+                    st.plotly_chart(
+                        fig,
+                        use_container_width=True,
+                        key=f"live_simulation_chart_{i}",
+                    )
+
+                with metrics.container():
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Risk", a["hypotension_risk_level"])
+                    c2.metric("Score", f"{a['hemodynamic_risk_score']:.0f}/100")
+                    c3.metric("Forecast MAP", f"{a['predicted_map_15min']:.1f}")
+                    c4.metric(
+                        "Probability",
+                        f"{result['features']['hypotension_probability']:.0%}",
+                    )
+
+                if result["alert_triggered"]:
+                    status.error(
+                        f"🔴 {a['alert_priority']} — {a['suspected_mechanism']} · "
+                        f"predicted MAP {a['predicted_map_15min']:.1f}"
+                    )
+                else:
+                    status.info(
+                        f"Monitoring · {a['suspected_mechanism']} · "
+                        f"trajectory {result['features']['trajectory']}"
+                    )
+
+                time.sleep(0.12)
+
+            if last_result:
+                st.success("Simulation replay complete.")
+                render_assessment(
+                    last_result,
+                    maps,
+                    chart_key="simulation_final_assessment_chart",
+                )
+
+
+with tab_csv:
+    st.subheader("Patient Data Replay")
+    st.write(
+        "Upload a de-identified monitor export. The file is replayed frame-by-frame "
+        "through the same deterministic prediction engine used by the API."
     )
 
     uploaded = st.file_uploader(
@@ -273,31 +414,50 @@ if source == "Patient data file":
         accept_multiple_files=False,
         help="Required: MAP and HR. Optional: timestamp/minute, SVV, EtCO2, SpO2, CVP.",
     )
-    patient_id = st.text_input("Patient / case ID", "CASE-001")
+
+    csv_patient_id = st.text_input(
+        "CSV Patient / Case ID",
+        "CASE-001",
+        key="csv_patient_id",
+    )
 
     if uploaded:
         try:
             file_bytes = uploaded.getvalue()
-            st.caption(f"Selected: {uploaded.name} • {len(file_bytes) / 1024:.1f} KB")
-            telemetry, report = parse_csv_bytes(file_bytes, patient_id=patient_id)
+            st.caption(
+                f"Selected: {uploaded.name} • {len(file_bytes) / 1024:.1f} KB"
+            )
+
+            telemetry, report = parse_csv_bytes(
+                file_bytes,
+                patient_id=csv_patient_id,
+            )
 
             st.success(
-                f"CSV validated: {report.rows_used} usable rows from {report.rows_read}. "
-                f"{report.rows_skipped} rows skipped."
+                f"CSV validated: {report.rows_used} usable rows from "
+                f"{report.rows_read}. {report.rows_skipped} rows skipped."
             )
 
             preview_rows = [
                 frame.model_dump(exclude_none=True)
                 for frame in telemetry.telemetry[:10]
             ]
+
             with st.expander("Preview imported data", expanded=True):
-                st.dataframe(preview_rows, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    preview_rows,
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
             info1, info2, info3, info4 = st.columns(4)
             info1.metric("Frames", report.rows_used)
-            info2.metric("Interval", f"{report.sampling_interval_seconds:.1f} s")
+            info2.metric("Sampling interval", f"{report.sampling_interval_seconds:.1f} s")
             info3.metric("Core signals", "MAP + HR")
-            info4.metric("Optional signals", f"{4 - len(report.missing_optional_signals)}/4")
+            info4.metric(
+                "Optional signals",
+                f"{4 - len(report.missing_optional_signals)}/4",
+            )
 
             if report.missing_optional_signals:
                 st.warning(
@@ -316,110 +476,144 @@ if source == "Patient data file":
                 "2026-10-08T10:00:30,0.5,79,78,10,35,99,7\n",
                 "AnestheSense_patient_template.csv",
                 "text/csv",
+                key="csv_template_download",
             )
 
-            speed = st.slider("Replay speed", 1.0, 30.0, 10.0, 1.0)
-            if st.button("Start patient replay", type="primary"):
-                final, predictions = run_replay(
-                    [frame.model_dump(exclude_none=True) for frame in telemetry.telemetry],
-                    patient_id,
+            speed = st.slider(
+                "Replay speed",
+                1.0,
+                30.0,
+                10.0,
+                1.0,
+                key="csv_replay_speed",
+            )
+
+            if st.button(
+                "Start patient replay",
+                type="primary",
+                key="start_csv_replay",
+            ):
+                frames = [
+                    frame.model_dump(exclude_none=True)
+                    for frame in telemetry.telemetry
+                ]
+
+                final, predictions = run_patient_replay(
+                    frames,
+                    csv_patient_id,
                     speed,
                 )
-                if final:
-                    st.success("Patient replay complete.")
-                    clinician_view(final, [frame.model_dump(exclude_none=True) for frame in telemetry.telemetry])
 
-                    mae10, mae15 = evaluate_replay(
-                        [frame.model_dump(exclude_none=True) for frame in telemetry.telemetry],
-                        predictions,
+                if final:
+                    render_csv_replay_result(
+                        final,
+                        frames,
+                        csv_patient_id,
                     )
-                    with st.expander("Validation result from this replay"):
+
+                    mae10, mae15 = evaluate_replay(frames, predictions)
+
+                    with st.expander("Retrospective replay validation"):
                         c1, c2 = st.columns(2)
-                        c1.metric("MAP +10 min MAE", "N/A" if mae10 is None else f"{mae10:.2f} mmHg")
-                        c2.metric("MAP +15 min MAE", "N/A" if mae15 is None else f"{mae15:.2f} mmHg")
-                        st.caption(
-                            "These are retrospective replay errors for this file, not clinical validation or calibration."
+                        c1.metric(
+                            "MAP +10 min MAE",
+                            "N/A" if mae10 is None else f"{mae10:.2f} mmHg",
                         )
-                    research_view(final, [frame.model_dump(exclude_none=True) for frame in telemetry.telemetry], patient_id)
+                        c2.metric(
+                            "MAP +15 min MAE",
+                            "N/A" if mae15 is None else f"{mae15:.2f} mmHg",
+                        )
+                        st.caption(
+                            "These are retrospective replay errors for this file, "
+                            "not clinical validation or calibration."
+                        )
 
         except ValueError as exc:
             st.error(str(exc))
 
 
-# ---------------------------------------------------------------------------
-# Synthetic simulation mode
-# ---------------------------------------------------------------------------
-elif source == "Synthetic simulation":
-    st.subheader("Simulation")
-    patient_id = st.text_input("Patient / case ID", "SIM-001")
-    scenario = st.selectbox(
-        "Scenario",
-        ["Vasodilation", "Hypovolemia", "Hemorrhage", "MixedShock", "HypoxiaStress", "Normotensive"],
-    )
-
-    if st.button("Start simulation", type="primary"):
-        try:
-            response = requests.post(
-                f"{API_URL.rstrip('/')}/api/v1/simulate",
-                json={
-                    "patient_id": patient_id,
-                    "scenario": scenario,
-                    "frames": 31,
-                    "interval_seconds": 30,
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            telemetry = response.json()["telemetry"]
-            final, predictions = run_replay(telemetry, patient_id, speed=10)
-            if final:
-                st.success("Simulation complete.")
-                clinician_view(final, telemetry)
-                research_view(final, telemetry, patient_id)
-        except requests.RequestException as exc:
-            st.error(f"Backend connection failed: {exc}")
-
-
-# ---------------------------------------------------------------------------
-# Manual mode
-# ---------------------------------------------------------------------------
-else:
-    st.subheader("Manual check")
-    st.write("Use this only for development or demonstration; clinicians should not manually enter live monitor values.")
-
-    patient_id = st.text_input("Patient / case ID", "MANUAL-001")
+with tab_manual:
+    st.subheader("Manual telemetry stress test")
     maps = st.slider("Current MAP", 40, 110, 70)
-    slope = st.slider("MAP trend (mmHg/min)", -3.0, 2.0, -0.5, 0.1)
+    map_slope = st.slider(
+        "Synthetic MAP trend (mmHg/min)",
+        -3.0,
+        2.0,
+        -0.5,
+        0.1,
+    )
     hr = st.slider("HR (bpm)", 40, 180, 90)
     svv = st.slider("SVV (%)", 0, 35, 12)
-    etco2 = st.slider("EtCO2 (mmHg)", 15, 60, 34)
-    spo2 = st.slider("SpO2 (%)", 70, 100, 98)
+    etco2 = st.slider("EtCO₂ (mmHg)", 15, 60, 34)
+    spo2 = st.slider("SpO₂ (%)", 70, 100, 98)
 
-    frames = [
-        {
-            "minute": i - 5,
-            "MAP": round(maps + slope * i, 1),
-            "HR": hr,
-            "SVV": svv,
-            "EtCO2": etco2,
-            "SpO2": spo2,
-        }
-        for i in range(6)
-    ]
+    manual_maps = [maps + map_slope * i for i in range(-5, 1)]
 
-    if st.button("Analyze", type="primary"):
+    payload = {
+        "patient_id": patient_id,
+        "sampling_interval_seconds": 60,
+        "telemetry": [
+            {
+                "minute": i - 5,
+                "MAP": round(value, 1),
+                "HR": hr,
+                "SVV": svv,
+                "EtCO2": etco2,
+                "SpO2": spo2,
+            }
+            for i, value in enumerate(manual_maps)
+        ],
+    }
+
+    if st.button("Analyze manual telemetry"):
         try:
-            result = post_predict(
-                {
-                    "patient_id": patient_id,
-                    "sampling_interval_seconds": 60,
-                    "telemetry": frames,
-                }
+            result = post_predict(payload)
+            render_assessment(
+                result,
+                manual_maps,
+                chart_key="manual_assessment_chart",
             )
-            clinician_view(result, frames)
-            research_view(result, frames, patient_id)
         except requests.RequestException as exc:
             st.error(f"Backend connection failed: {exc}")
+
+
+with tab_about:
+    st.subheader("AnestheSense v4 architecture")
+    st.code(
+        """
+Telemetry
+   ↓
+Signal Preprocessor Agent
+   ├─ artifact rejection
+   ├─ signal quality
+   └─ waveform features
+   ↓
+Predictive Analytics Agent
+   ├─ trend
+   ├─ acceleration
+   ├─ volatility
+   ├─ 10/15-min MAP forecast
+   └─ hypotension probability
+   ↓
+Clinical Advisory Agent
+   ├─ risk severity
+   ├─ mechanism hypothesis
+   ├─ contributing factors
+   └─ clinician-directed guidance
+   ↓
+Safety Guardrail
+   ├─ severity cannot be downgraded
+   ├─ HIGH/CRITICAL alarm cannot be suppressed
+   └─ no medication dosing
+   ↓
+Clinician Dashboard + Audit Trail
+        """,
+        language="text",
+    )
+    st.warning(
+        "Research/demo prototype only. Outputs are not clinically validated and must "
+        "not be used to direct patient care."
+    )
 
 
 st.divider()
