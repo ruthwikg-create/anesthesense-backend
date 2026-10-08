@@ -647,16 +647,21 @@ def csv_template():
 
 def normalized_csv():
     output = io.StringIO()
-    output.write("minute,MAP,HR,SVV,EtCO2,SpO2,CVP\n")
+    output.write("minute,MAP,HR,SBP,DBP,SVV,EtCO2,SpO2,CVP,BIS,TOF_twitches,TOF_ratio\n")
     for frame in telemetry_frames():
         values = [
             frame.get("minute", ""),
             frame.get("MAP", ""),
             frame.get("HR", ""),
+            frame.get("SBP", ""),
+            frame.get("DBP", ""),
             frame.get("SVV", ""),
             frame.get("EtCO2", ""),
             frame.get("SpO2", ""),
             frame.get("CVP", ""),
+            frame.get("BIS", ""),
+            frame.get("TOF_twitches", ""),
+            frame.get("TOF_ratio", ""),
         ]
         output.write(",".join("" if value is None else str(value) for value in values))
         output.write("\n")
