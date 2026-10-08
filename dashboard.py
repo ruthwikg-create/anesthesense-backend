@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-from patient_replay import parse_csv_text
+from patient_replay import parse_csv_bytes
 
 
 st.set_page_config(
@@ -267,18 +267,31 @@ if source == "Patient data file":
         "through the same prediction engine used by the API."
     )
 
-    uploaded = st.file_uploader("Upload CSV", type=["csv"])
+    uploaded = st.file_uploader(
+        "Choose a patient CSV file",
+        type=["csv"],
+        accept_multiple_files=False,
+        help="Required: MAP and HR. Optional: timestamp/minute, SVV, EtCO2, SpO2, CVP.",
+    )
     patient_id = st.text_input("Patient / case ID", "CASE-001")
 
     if uploaded:
         try:
-            text = uploaded.getvalue().decode("utf-8-sig")
-            telemetry, report = parse_csv_text(text, patient_id=patient_id)
+            file_bytes = uploaded.getvalue()
+            st.caption(f"Selected: {uploaded.name} • {len(file_bytes) / 1024:.1f} KB")
+            telemetry, report = parse_csv_bytes(file_bytes, patient_id=patient_id)
 
             st.success(
-                f"Loaded {report.rows_used} usable rows from {report.rows_read}. "
-                f"Skipped {report.rows_skipped} rows."
+                f"CSV validated: {report.rows_used} usable rows from {report.rows_read}. "
+                f"{report.rows_skipped} rows skipped."
             )
+
+            preview_rows = [
+                frame.model_dump(exclude_none=True)
+                for frame in telemetry.telemetry[:10]
+            ]
+            with st.expander("Preview imported data", expanded=True):
+                st.dataframe(preview_rows, use_container_width=True, hide_index=True)
 
             info1, info2, info3, info4 = st.columns(4)
             info1.metric("Frames", report.rows_used)
@@ -295,6 +308,15 @@ if source == "Patient data file":
 
             with st.expander("Imported column mapping"):
                 st.json(report.mapped_columns)
+
+            st.download_button(
+                "Download CSV template",
+                "timestamp,minute,MAP,HR,SVV,EtCO2,SpO2,CVP\n"
+                "2026-10-08T10:00:00,0,82,76,9,36,99,7\n"
+                "2026-10-08T10:00:30,0.5,79,78,10,35,99,7\n",
+                "AnestheSense_patient_template.csv",
+                "text/csv",
+            )
 
             speed = st.slider("Replay speed", 1.0, 30.0, 10.0, 1.0)
             if st.button("Start patient replay", type="primary"):
