@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
@@ -17,15 +18,24 @@ ALIASES = {
     "minute": {"minute", "minutes", "elapsed_min", "elapsed_minutes", "relative_time"},
     "MAP": {
         "map", "mean arterial pressure", "mean arterial pressure map",
-        "arterial pressure mean", "nibp mean", "abp mean"
+        "arterial pressure mean", "nibp mean", "abp mean", "map mmhg", "map mm hg"
     },
-    "HR": {"hr", "heart rate", "heart_rate", "pulse", "pulse rate"},
-    "SVV": {"svv", "stroke volume variation", "stroke_volume_variation"},
+    "HR": {
+        "hr", "heart rate", "heart_rate", "pulse", "pulse rate",
+        "hr bpm", "heart rate bpm"
+    },
+    "SVV": {
+        "svv", "stroke volume variation", "stroke_volume_variation",
+        "svv percent", "svv %"
+    },
     "EtCO2": {
         "etco2", "etco2 mmhg", "etco2 (mmhg)", "end tidal co2",
         "end tidal co2 mmhg", "end_tidal_co2"
     },
-    "SpO2": {"spo2", "spo2 percent", "spo2 (%)", "oxygen saturation", "o2 sat"},
+    "SpO2": {
+        "spo2", "spo2 percent", "spo2 (%)", "oxygen saturation",
+        "o2 sat", "spo2 %", "spo2 percentage"
+    },
     "CVP": {"cvp", "central venous pressure"},
 }
 
@@ -42,7 +52,38 @@ class ReplayReport:
 
 
 def _normalise(value: str) -> str:
-    return " ".join(value.strip().lower().replace("_", " ").replace("-", " ").split())
+    text = str(value).strip().lower().replace("\ufeff", "")
+    text = re.sub(r"[%()\[\]{}:/\\\\]+", " ", text)
+    text = text.replace("_", " ").replace("-", " ")
+    return " ".join(text.split())
+
+
+def _decode_csv_bytes(csv_bytes: bytes) -> str:
+    if not csv_bytes:
+        raise ValueError("The selected CSV file is empty.")
+
+    for encoding in ("utf-8-sig", "utf-8", "utf-16", "cp1252"):
+        try:
+            return csv_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+    raise ValueError(
+        "Could not read this CSV encoding. Save/export the file as UTF-8 CSV and try again."
+    )
+
+
+def parse_csv_bytes(
+    csv_bytes: bytes,
+    patient_id: str = "REPLAY-001",
+    default_interval_seconds: float = 30.0,
+) -> tuple[PatientTelemetry, ReplayReport]:
+    """Parse an uploaded CSV file with encoding and delimiter detection."""
+    return parse_csv_text(
+        _decode_csv_bytes(csv_bytes),
+        patient_id=patient_id,
+        default_interval_seconds=default_interval_seconds,
+    )
 
 
 def _column_map(fieldnames: Iterable[str]) -> dict[str, str]:
@@ -85,7 +126,12 @@ def parse_csv_text(
     patient_id: str = "REPLAY-001",
     default_interval_seconds: float = 30.0,
 ) -> tuple[PatientTelemetry, ReplayReport]:
-    reader = csv.DictReader(io.StringIO(csv_text))
+    sample = csv_text[:8192]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.DictReader(io.StringIO(csv_text), dialect=dialect)
     if not reader.fieldnames:
         raise ValueError("CSV must contain a header row.")
 
@@ -102,7 +148,11 @@ def parse_csv_text(
     for row in rows:
         timestamp = _timestamp_seconds(row.get(mapped["timestamp"])) if "timestamp" in mapped else None
         minute = _number(row.get(mapped["minute"])) if "minute" in mapped else None
-        values = {target: _number(row.get(column)) for target, column in mapped.items() if target not in {"timestamp", "minute"}}
+        values = {
+            target: _number(row.get(column))
+            for target, column in mapped.items()
+            if target not in {"timestamp", "minute"}
+        }
 
         if values.get("MAP") is None or values.get("HR") is None:
             continue
