@@ -2,6 +2,7 @@ import os
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from agent import evaluate_patient_risk
 from schema import PatientTelemetry, PredictionResponse, SimulationRequest
@@ -11,7 +12,7 @@ from simulation import build_simulation
 app = FastAPI(
     title="AnestheSense CDS API",
     description="AI-assisted intraoperative hemodynamic early-warning prototype.",
-    version="4.0.0",
+    version="4.1.0",
 )
 
 app.add_middleware(
@@ -44,6 +45,8 @@ def health():
         "streaming": True,
         "forecasting": True,
         "simulation": True,
+        "csv_replay": True,
+        "safety_guardrails": True,
     }
 
 
@@ -69,19 +72,39 @@ def predict(telemetry: PatientTelemetry):
         return _prediction_response(telemetry)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Telemetry validation failed: " + str(exc),
+        ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Assessment failed: {exc}") from exc
+        # Keep the API alive while exposing a useful, non-empty diagnostic.
+        raise HTTPException(
+            status_code=500,
+            detail=f"Assessment failed safely: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 @app.post("/api/v1/simulate", response_model=PatientTelemetry)
 def simulate(request: SimulationRequest):
-    return build_simulation(request)
+    try:
+        return build_simulation(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/simulate/analyze", response_model=PredictionResponse)
 def simulate_and_analyze(request: SimulationRequest):
-    telemetry = build_simulation(request)
-    return _prediction_response(telemetry)
+    try:
+        telemetry = build_simulation(request)
+        return _prediction_response(telemetry)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Simulation analysis failed safely: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 @app.websocket("/ws/telemetry")
@@ -94,7 +117,15 @@ async def telemetry_stream(websocket: WebSocket):
                 telemetry = PatientTelemetry.model_validate(payload)
                 result = _prediction_response(telemetry)
                 await websocket.send_json(result.model_dump())
+            except (ValueError, ValidationError) as exc:
+                await websocket.send_json({
+                    "error": "VALIDATION_ERROR",
+                    "detail": str(exc),
+                })
             except Exception as exc:
-                await websocket.send_json({"error": str(exc)})
+                await websocket.send_json({
+                    "error": "ASSESSMENT_ERROR",
+                    "detail": f"{type(exc).__name__}: {exc}",
+                })
     except WebSocketDisconnect:
         pass
